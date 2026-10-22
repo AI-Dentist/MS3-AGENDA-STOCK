@@ -13,3 +13,6 @@ Route::get('/health', function () {
         'timestamp' => now()
     ]);
 });
+
+use App\Http\Controllers\CitaController;
+Route::post('/citas', [CitaController::class, 'store']);
