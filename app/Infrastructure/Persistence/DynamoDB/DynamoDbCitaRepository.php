@@ -47,4 +47,24 @@ class DynamoDbCitaRepository implements CitaRepositoryInterface
         $items[] = $cita->toArray();
         File::put($this->filePath, json_encode($items, JSON_PRETTY_PRINT));
     }
+
+    public function findAll(): array
+    {
+        $items = json_decode(File::get($this->filePath), true) ?? [];
+        $citas = [];
+
+        foreach ($items as $item) {
+            $citas[] = new Cita(
+                id: $item['id'],
+                idempotencyKey: $item['idempotency_key'] ?? '',
+                odontologoId: $item['odontologo_id'],
+                consultorioId: $item['consultorio_id'],
+                pacienteId: $item['paciente_id'],
+                fechaHora: $item['fecha_hora'],
+                estado: $item['estado'] ?? 'RESERVADA'
+            );
+        }
+
+        return $citas;
+    }
 }

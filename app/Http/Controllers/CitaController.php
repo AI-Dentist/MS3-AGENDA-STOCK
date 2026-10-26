@@ -3,37 +3,52 @@
 namespace App\Http\Controllers;
 
 use App\Application\UseCases\AgendarCitaUseCase;
-use Illuminate\Http\JsonResponse;
+use App\Domain\Repositories\CitaRepositoryInterface;
 use Illuminate\Http\Request;
+use Illuminate\Http\JsonResponse;
 
 class CitaController extends Controller
 {
-    public function __construct(private AgendarCitaUseCase $agendarCitaUseCase) {}
+    public function __construct(
+        private AgendarCitaUseCase $agendarCitaUseCase,
+        private CitaRepositoryInterface $citaRepository
+    ) {}
+
+    public function index(): JsonResponse
+    {
+        $citas = $this->citaRepository->findAll();
+
+        return response()->json([
+            'citas' => array_map(fn($cita) => $cita->toArray(), $citas),
+            'total' => count($citas)
+        ]);
+    }
 
     public function store(Request $request): JsonResponse
     {
-        // 1. Obtener clave de idempotencia de la cabecera HTTP
         $idempotencyKey = $request->header('Idempotency-Key');
 
         if (!$idempotencyKey) {
             return response()->json([
-                'error' => 'Falta la cabecera obligatoria Idempotency-Key'
+                'error' => 'El encabezado Idempotency-Key es obligatorio.'
             ], 400);
         }
 
-        // 2. Validar payload de entrada
         $validated = $request->validate([
             'odontologo_id'  => 'required|string',
             'consultorio_id' => 'required|string',
             'paciente_id'    => 'required|string',
-            'fecha_hora'     => 'required|date_format:Y-m-d H:i:s',
+            'fecha_hora'     => 'required|string'
         ]);
 
-        // 3. Delegar la ejecución al caso de uso
-        $resultado = $this->agendarCitaUseCase->execute($validated, $idempotencyKey);
+        $resultado = $this->agendarCitaUseCase->ejecutar(
+            idempotencyKey: $idempotencyKey,
+            odontologoId: $validated['odontologo_id'],
+            consultorioId: $validated['consultorio_id'],
+            pacienteId: $validated['paciente_id'],
+            fechaHora: $validated['fecha_hora']
+        );
 
-        $statusCode = $resultado['idempotente'] ? 200 : 201;
-
-        return response()->json($resultado, $statusCode);
+        return response()->json($resultado, $resultado['idempotente'] ? 200 : 201);
     }
 }
