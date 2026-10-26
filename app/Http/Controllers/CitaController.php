@@ -41,13 +41,7 @@ class CitaController extends Controller
             'fecha_hora'     => 'required|string'
         ]);
 
-        $resultado = $this->agendarCitaUseCase->ejecutar(
-            idempotencyKey: $idempotencyKey,
-            odontologoId: $validated['odontologo_id'],
-            consultorioId: $validated['consultorio_id'],
-            pacienteId: $validated['paciente_id'],
-            fechaHora: $validated['fecha_hora']
-        );
+        $resultado = $this->agendarCitaUseCase->execute($validated, $idempotencyKey);
 
         return response()->json($resultado, $resultado['idempotente'] ? 200 : 201);
     }
