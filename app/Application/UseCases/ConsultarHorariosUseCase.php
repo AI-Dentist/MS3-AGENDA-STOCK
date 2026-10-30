@@ -10,10 +10,10 @@ class ConsultarHorariosUseCase
 
     public function execute(?string $odontologoId = null): array
     {
-        $horarios = $odontologoId 
+        $horarios = $odontologoId
             ? $this->repository->findByOdontologo($odontologoId)
             : $this->repository->findAll();
 
-        return array_map(fn($horario) => $horario->toArray(), $horarios);
+        return array_map(fn ($horario) => $horario->toArray(), $horarios);
     }
 }

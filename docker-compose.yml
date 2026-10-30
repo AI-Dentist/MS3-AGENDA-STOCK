@@ -1,0 +1,43 @@
+services:
+  ms3-agenda-stock:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ms3_agenda_stock_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=local
+      - APP_DEBUG=true
+      - APP_KEY=${APP_KEY}
+      - ML_SERVICE_URL=http://ms3-ml-service:8001
+      - API_GATEWAY_URL=http://localhost:8080
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=local
+      - AWS_SECRET_ACCESS_KEY=local
+    depends_on:
+      - ms3-ml-service
+      - dynamodb-local
+    volumes:
+      - .:/var/www/html
+      - /var/www/html/vendor
+
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: ms3_dynamodb_local
+    ports:
+      - "8002:8000"
+    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
+
+  ms3-ml-service:
+    build:
+      context: ./ml_service
+      dockerfile: Dockerfile
+    container_name: ms3_ml_sidecar
+    ports:
+      - "8001:8001"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./ml_service:/app

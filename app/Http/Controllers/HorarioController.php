@@ -14,8 +14,14 @@ class HorarioController extends Controller
         $horarios = $useCase->execute($odontologoId);
 
         return response()->json([
+            'success' => true,
+            'data' => [
+                'horarios' => $horarios,
+                'total' => count($horarios),
+            ],
             'horarios' => $horarios,
-            'total' => count($horarios)
+            'total' => count($horarios),
+            'timestamp' => now()->toIso8601String(),
         ], 200);
     }
 }

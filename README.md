@@ -1,58 +1,148 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# MS3 — Microservicio de Agenda, Horarios, Inventario y Machine Learning
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Microservicio del ecosistema clínico odontológico encargado de la gestión de turnos, agendamiento de citas con prevención de colisiones e idempotencia, ciclo clínico completo, catálogo, movimientos y kardex de inventario con deducción atómica, persistencia en Amazon DynamoDB, seguridad Keycloak JWT y analítica predictiva con Machine Learning Clásico.
 
-## About Laravel
+---
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## 🏗️ Arquitectura de la Solución
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+El servicio implementa los principios de **Clean / Hexagonal Architecture** en Laravel 11/12 junto a un **Micro-Sidecar en FastAPI (Python 3)** para la ejecución de modelos analíticos en memoria sin penalidad de latencia y persistencia nativa en **Amazon DynamoDB**.
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
-
-## Learning Laravel
-
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
-
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
-
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
-
-## Agentic Development
-
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
-
-```bash
-composer require laravel/boost --dev
-
-php artisan boost:install
+```
+                    ┌────────────────────────┐
+                    │ API Gateway / Frontend │
+                    │    (Shell :4200)       │
+                    └───────────┬────────────┘
+                                │  HTTP REST (/api/agendamiento/**)
+                                ▼
+         ┌────────────────────────────────────────────────────────┐
+         │              MS3 — Laravel Application (PHP 8.3+)      │
+         │  ┌──────────────┐ ┌───────────────┐ ┌───────────────┐  │
+         │  │ KeycloakAuth │ │ Use Cases     │ │ DynamoDB Repos│  │
+         │  │ (RS256 JWT)  │ │ (Application) │ │ (Persistence) │  │
+         │  └──────┬───────┘ └───────┬───────┘ └───────┬───────┘  │
+         │         │                 │                 │          │
+         │         │                 ▼                 ▼          │
+         │         │        Domain Services     Amazon DynamoDB   │
+         │         │        (MlInference)       (Tablas & GSIs)   │
+         │         │                 │                 │          │
+         │         │                 ▼                 ▼          │
+         │         │        FastApiMlService    transactWriteItems│
+         └─────────┼─────────────────┼────────────────────────────┘
+                   │                 │  HTTP Interno (:8001)
+                   │                 ▼
+         ┌─────────┴──────────────────────────────────────────────┐
+         │           MS3 — Machine Learning Sidecar (FastAPI)     │
+         │                                                        │
+         │  • Modelo Supervisado: Random Forest (No-Show)         │
+         │  • Modelo No Supervisado: K-Means (Segmentación)       │
+         │  • Modelo No Supervisado: K-Means (Clasificación ABC)  │
+         │  • Centroides semánticos ordenados determinísticamente │
+         │  • Binarios Serializados (.joblib) en Memoria          │
+         └────────────────────────────────────────────────────────┘
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+---
 
-## Contributing
+## 💾 Persistencia en Amazon DynamoDB
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+El microservicio utiliza **Amazon DynamoDB** como motor de almacenamiento NoSQL de alto rendimiento:
 
-## Code of Conduct
+1. **Tablas e Índices Secundarios Globales (GSI):**
+   - `citas`: Partition Key (`id`), GSI (`idempotency_key-index`), GSI (`odontologo_fecha-index`).
+   - `horarios`: Partition Key (`id`), GSI (`odontologo_id-index`).
+   - `insumos`: Partition Key (`id`), GSI (`codigo-index`).
+   - `movimientos_stock`: Partition Key (`id`), GSI (`insumo_id-index`).
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+2. **Deducción Atómica (`transactWriteItems`):**
+   - La finalización de citas odontológicas (`CompletarCitaYDescontarStockUseCase`) ejecuta transacciones atómicas con expresiones de condición (`attribute_exists(id) AND stock_actual >= :cantidad`) para evitar inventarios negativos y registrar simultáneamente el movimiento en el Kardex.
 
-## Security Vulnerabilities
+3. **Comando de Configuración:**
+   ```bash
+   php artisan dynamodb:setup --seed
+   ```
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+---
 
-## License
+## 🔒 Seguridad y JWT Keycloak (RBAC)
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+- Verificación criptográfica de tokens JWT con algoritmos **RS256** / **HS256** mediante `firebase/php-jwt`.
+- **Anti-Spoofing:** Rechazo tajante de cabeceras inyectadas `X-User-Roles` sin token Bearer válido.
+- Enlace del usuario autenticado en `$request->attributes` y `$request->setUserResolver()`.
+- Control de acceso por roles (`ADMIN`, `RECEPCIONISTA`, `ODONTOLOGO`, `ASISTENTE`).
+- **CORS W3C Estricto:** Eliminación de comodines (`*`) con `supports_credentials => true`, permitiendo exclusivamente orígenes confiables (`localhost:4200`, API Gateway).
+
+---
+
+## 🚀 Modelos de Machine Learning Incorporados
+
+1. **Supervisado (Predicción de Inasistencias / No-Show):**
+   - **Algoritmo:** `RandomForestClassifier` optimizado dentro de un `Pipeline` con `StandardScaler`.
+   - **Variables:** Edad del paciente, días de anticipación de reserva, historial de cancelaciones previas, día de la semana, hora de la cita y nivel de complejidad del tratamiento.
+   - **Salida:** Probabilidad de inasistencia (0.0 a 1.0), clasificación de riesgo (`BAJO`, `MEDIO`, `ALTO`) y recomendación operativa de sobrecupo o confirmación preventiva.
+
+2. **No Supervisado (Segmentación de Pacientes):**
+   - **Algoritmo:** `K-Means Clustering` ($k=3$) con **centroides ordenados por peso semántico** (`total_citas * gasto_total_usd`).
+   - **Garantía Determinística:** Pacientes de alta frecuencia y compromiso siempre son asignados al Clúster 0 ("Paciente Frecuente / Alto Compromiso"), mientras que perfiles de abandono son asignados al Clúster 2 ("Paciente en Riesgo de Deserción").
+
+3. **No Supervisado (Clasificación ABC de Inventario):**
+   - **Algoritmo:** `K-Means Clustering` ($k=3$) con ordenamiento por valor monetario de rotación (`consumo_mensual * costo_unitario`).
+   - **Garantía Determinística:** Clúster 0 representa Categoría A (Alto Valor / Rotación Crítica), Clúster 1 Categoría B y Clúster 2 Categoría C.
+
+---
+
+## 📡 Catálogo de Endpoints REST (`/api/agendamiento/**`)
+
+### Agenda y Citas
+- `GET /api/agendamiento/citas`: Listar citas registradas.
+- `POST /api/agendamiento/citas`: Crear cita con `Idempotency-Key`, validación de turnos del odontólogo y prevención de colisiones (`409 Conflict`).
+- `PATCH /api/agendamiento/citas/{id}/cancelar`: Cancelar una cita existente.
+- `PUT /api/agendamiento/citas/{id}/reprogramar`: Reprogramar a un nuevo horario verificando disponibilidad.
+- `PATCH /api/agendamiento/citas/{id}/completar`: Completar cita y descontar stock atómicamente en DynamoDB.
+- `PATCH /api/agendamiento/citas/{id}/no-asistio`: Registrar inasistencia del paciente (`NO_ASISTIO`).
+
+### Horarios, Inventario y Kardex
+- `GET /api/agendamiento/horarios`: Consultar horarios y turnos de odontólogos.
+- `GET /api/agendamiento/stock`: Consultar catálogo de insumos y alertas de reposición.
+- `POST /api/agendamiento/stock/movimientos`: Registrar movimientos manuales de inventario (`ENTRADA_COMPRA`, `SALIDA_PROCEDIMIENTO`, `AJUSTE`).
+- `GET /api/agendamiento/stock/{id}/kardex`: Consultar historial de movimientos (Kardex) de un insumo.
+
+### Machine Learning
+- `GET /api/agendamiento/ml/health`: Estado del motor de inferencia y modelos cargados en memoria.
+- `POST /api/agendamiento/ml/predict-no-show`: Estimar probabilidad de inasistencia de una cita.
+- `POST /api/agendamiento/ml/cluster-paciente`: Segmentación de comportamiento de paciente.
+- `POST /api/agendamiento/ml/cluster-stock`: Clasificación ABC de criticidad de insumos.
+
+---
+
+## 🛠️ Ejecución Local
+
+### Opción 1: Con Docker Compose (Recomendado)
+```bash
+docker-compose up --build
+```
+- Backend Laravel: `http://localhost:8000`
+- ML Sidecar: `http://localhost:8001`
+- DynamoDB Local: `http://localhost:8002`
+
+### Opción 2: Ejecución Nativa
+```powershell
+# 1. Instalar dependencias de PHP y Python
+composer install
+pip install -r ml_service/requirements.txt
+
+# 2. Entrenar y exportar modelos serializados
+python ml_service/train_models.py
+
+# 3. Iniciar servicios simultáneamente
+.\run_services.ps1
+```
+
+### Ejecutar Pruebas Automatizadas
+```bash
+# Pruebas de PHP (Unit & Feature con PHPUnit)
+php artisan test
+
+# Pruebas del Sidecar de ML (FastAPI TestClient)
+python ml_service/test_ml_service.py
+```

@@ -1,8 +1,9 @@
 <?php
 
+use App\Providers\AppServiceProvider;
+use App\Providers\DynamoDbServiceProvider;
+
 return [
-    App\Providers\AppServiceProvider::class,
-    App\Providers\DynamoDbServiceProvider::class,
+    AppServiceProvider::class,
+    DynamoDbServiceProvider::class,
 ];
-
-

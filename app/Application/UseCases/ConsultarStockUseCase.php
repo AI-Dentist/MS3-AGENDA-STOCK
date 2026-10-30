@@ -12,6 +12,6 @@ class ConsultarStockUseCase
     {
         $insumos = $this->repository->findAll();
 
-        return array_map(fn($insumo) => $insumo->toArray(), $insumos);
+        return array_map(fn ($insumo) => $insumo->toArray(), $insumos);
     }
 }
