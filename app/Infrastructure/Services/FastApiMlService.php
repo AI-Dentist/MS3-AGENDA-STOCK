@@ -12,22 +12,22 @@ class FastApiMlService implements MlInferenceServiceInterface
 
     public function __construct()
     {
-        $this->baseUrl = rtrim(env('ML_SERVICE_URL', 'http://127.0.0.1:8001'), '/');
+        $this->baseUrl = rtrim(env('ML_SERVICE_URL', 'http://127.0.0.1:8005'), '/');
     }
 
     public function predictNoShow(array $data): array
     {
         $response = Http::timeout(4)->post("{$this->baseUrl}/predict/no-show", [
-            'edad' => (int) $data['edad'],
-            'dias_anticipacion' => (int) $data['dias_anticipacion'],
-            'cancelaciones_previas' => (int) $data['cancelaciones_previas'],
-            'dia_semana' => (int) $data['dia_semana'],
-            'hora_cita' => (int) $data['hora_cita'],
-            'tipo_tratamiento_riesgo' => (int) $data['tipo_tratamiento_riesgo'],
+            'edad' => (int)$data['edad'],
+            'dias_anticipacion' => (int)$data['dias_anticipacion'],
+            'cancelaciones_previas' => (int)$data['cancelaciones_previas'],
+            'dia_semana' => (int)$data['dia_semana'],
+            'hora_cita' => (int)$data['hora_cita'],
+            'tipo_tratamiento_riesgo' => (int)$data['tipo_tratamiento_riesgo'],
         ]);
 
         if ($response->failed()) {
-            throw new RuntimeException('Error en inferencia de No-Show: '.$response->body());
+            throw new RuntimeException("Error en inferencia de No-Show: " . $response->body());
         }
 
         return $response->json();
@@ -36,14 +36,14 @@ class FastApiMlService implements MlInferenceServiceInterface
     public function clusterPatient(array $data): array
     {
         $response = Http::timeout(4)->post("{$this->baseUrl}/cluster/patient", [
-            'total_citas' => (int) $data['total_citas'],
-            'tasa_asistencia' => (float) $data['tasa_asistencia'],
-            'dias_promedio_entre_citas' => (float) $data['dias_promedio_entre_citas'],
-            'gasto_total_usd' => (float) $data['gasto_total_usd'],
+            'total_citas' => (int)$data['total_citas'],
+            'tasa_asistencia' => (float)$data['tasa_asistencia'],
+            'dias_promedio_entre_citas' => (float)$data['dias_promedio_entre_citas'],
+            'gasto_total_usd' => (float)$data['gasto_total_usd'],
         ]);
 
         if ($response->failed()) {
-            throw new RuntimeException('Error en clustering de paciente: '.$response->body());
+            throw new RuntimeException("Error en clustering de paciente: " . $response->body());
         }
 
         return $response->json();
@@ -52,13 +52,13 @@ class FastApiMlService implements MlInferenceServiceInterface
     public function clusterStock(array $data): array
     {
         $response = Http::timeout(4)->post("{$this->baseUrl}/cluster/stock", [
-            'consumo_mensual' => (float) $data['consumo_mensual'],
-            'costo_unitario' => (float) $data['costo_unitario'],
-            'dias_reabastecimiento' => (int) $data['dias_reabastecimiento'],
+            'consumo_mensual' => (float)$data['consumo_mensual'],
+            'costo_unitario' => (float)$data['costo_unitario'],
+            'dias_reabastecimiento' => (int)$data['dias_reabastecimiento'],
         ]);
 
         if ($response->failed()) {
-            throw new RuntimeException('Error en clustering de insumo: '.$response->body());
+            throw new RuntimeException("Error en clustering de insumo: " . $response->body());
         }
 
         return $response->json();
@@ -78,7 +78,7 @@ class FastApiMlService implements MlInferenceServiceInterface
         return [
             'status' => 'DOWN',
             'service' => 'MS3 - Machine Learning Sidecar',
-            'error' => 'No se pudo conectar con el servicio FastAPI en '.$this->baseUrl,
+            'error' => 'No se pudo conectar con el servicio FastAPI en ' . $this->baseUrl
         ];
     }
 }
