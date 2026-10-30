@@ -40,25 +40,69 @@ class CitaController extends Controller
         ], 200);
     }
 
+    public function show(string $id): JsonResponse
+    {
+        $cita = $this->citaRepository->findById($id);
+        if (! $cita) {
+            return response()->json([
+                'success' => false,
+                'error' => "Cita no encontrada con ID: {$id}.",
+                'code' => 'NOT_FOUND',
+                'timestamp' => now()->toIso8601String(),
+            ], 404);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $cita->toArray(),
+            'timestamp' => now()->toIso8601String(),
+        ], 200);
+    }
+
     public function store(Request $request): JsonResponse
     {
-        $idempotencyKey = $request->header('Idempotency-Key');
+        $idempotencyKey = $request->header('Idempotency-Key') ?? $request->header('X-Idempotency-Key');
 
         if (! $idempotencyKey) {
             return response()->json([
                 'success' => false,
-                'error' => 'El encabezado Idempotency-Key es obligatorio.',
+                'error' => 'El encabezado Idempotency-Key o X-Idempotency-Key es obligatorio.',
                 'code' => 'MISSING_IDEMPOTENCY_KEY',
                 'timestamp' => now()->toIso8601String(),
             ], 400);
         }
 
-        $validated = $request->validate([
+        // Normalización adaptativa de parámetros (admite snake_case nativo y camelCase OpenAPI)
+        $odontologoId = $request->input('odontologo_id') ?? $request->input('odontologoId');
+        $consultorioId = $request->input('consultorio_id') ?? $request->input('consultorioId') ?? ($request->filled('sillonNumero') ? 'con-' . $request->input('sillonNumero') : null);
+        $pacienteId = $request->input('paciente_id') ?? $request->input('pacienteId');
+        $fechaHora = $request->input('fecha_hora') ?? $request->input('fechaHoraInicio') ?? $request->input('fechaHora');
+
+        $data = [
+            'odontologo_id' => $odontologoId,
+            'consultorio_id' => $consultorioId,
+            'paciente_id' => $pacienteId,
+            'fecha_hora' => $fechaHora,
+        ];
+
+        $validator = validator($data, [
             'odontologo_id' => 'required|string',
             'consultorio_id' => 'required|string',
             'paciente_id' => 'required|string',
             'fecha_hora' => 'required|string',
         ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'error' => 'Error de validación de campos para la cita.',
+                'code' => 'INVALID_APPOINTMENT_DATA',
+                'errors' => $validator->errors(),
+                'timestamp' => now()->toIso8601String(),
+            ], 422);
+        }
+
+        $validated = $validator->validated();
 
         try {
             $resultado = $this->agendarCitaUseCase->execute($validated, $idempotencyKey);

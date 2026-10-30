@@ -119,10 +119,15 @@ class KeycloakAuthMiddleware
     {
         if (! empty($roles)) {
             $hasRequiredRole = false;
-            $userRolesUpper = array_map('strtoupper', $userRoles);
+            // Normalizar roles: remover prefijo ROLE_ y homologar DENTISTA con ODONTOLOGO
+            $userRolesUpper = array_map(function ($r) {
+                $clean = strtoupper(str_replace('ROLE_', '', trim($r)));
+                return $clean === 'DENTISTA' ? 'ODONTOLOGO' : $clean;
+            }, $userRoles);
 
             foreach ($roles as $requiredRole) {
-                if (in_array(strtoupper($requiredRole), $userRolesUpper, true)) {
+                $normalizedRequired = strtoupper(str_replace('ROLE_', '', trim($requiredRole)));
+                if (in_array($normalizedRequired, $userRolesUpper, true)) {
                     $hasRequiredRole = true;
                     break;
                 }

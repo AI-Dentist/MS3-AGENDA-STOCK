@@ -26,6 +26,7 @@ Route::prefix('api/agendamiento')->middleware('auth.keycloak')->group(function (
     // 2. Agenda y Citas Odontológicas (CRUD Completo y Ciclo Clínico)
     Route::middleware('auth.keycloak:ADMIN,RECEPCIONISTA,ODONTOLOGO')->group(function () {
         Route::get('/citas', [CitaController::class, 'index']);
+        Route::get('/citas/{id}', [CitaController::class, 'show']);
         Route::post('/citas', [CitaController::class, 'store']);
         Route::patch('/citas/{id}/cancelar', [CitaController::class, 'cancelar']);
         Route::put('/citas/{id}/reprogramar', [CitaController::class, 'reprogramar']);

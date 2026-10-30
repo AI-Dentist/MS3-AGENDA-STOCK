@@ -130,4 +130,66 @@ class CitaApiTest extends TestCase
                 ],
             ]);
     }
+
+    public function test_obtener_cita_por_id_endpoint(): void
+    {
+        $uniqueHour = '2026-12-08 09:00:00';
+        $key = (string) Str::uuid();
+
+        $res = $this->withHeader('Idempotency-Key', $key)
+            ->postJson('/api/agendamiento/citas', [
+                'odontologo_id' => 'odo-show-test',
+                'consultorio_id' => 'con-show-test',
+                'paciente_id' => 'pac-show-test',
+                'fecha_hora' => $uniqueHour,
+            ]);
+
+        $res->assertStatus(201);
+        $citaId = $res->json('data.id');
+
+        $resShow = $this->getJson("/api/agendamiento/citas/{$citaId}");
+        $resShow->assertStatus(200)
+            ->assertJson([
+                'success' => true,
+                'data' => [
+                    'id' => $citaId,
+                    'paciente_id' => 'pac-show-test',
+                    'estado' => 'RESERVADA',
+                ],
+            ]);
+
+        $resNotFound = $this->getJson('/api/agendamiento/citas/cita_inexistente_999');
+        $resNotFound->assertStatus(404)
+            ->assertJson([
+                'success' => false,
+                'code' => 'NOT_FOUND',
+            ]);
+    }
+
+    public function test_agenda_cita_con_formato_camelcase_openapi(): void
+    {
+        $uniqueHour = '2026-12-09 10:00:00';
+        $key = (string) Str::uuid();
+
+        // Enviar payload según contrato OpenAPI (camelCase, sillonNumero y X-Idempotency-Key)
+        $res = $this->withHeader('X-Idempotency-Key', $key)
+            ->postJson('/api/agendamiento/citas', [
+                'odontologoId' => 'odo-openapi-test',
+                'sillonNumero' => 1,
+                'pacienteId' => 'pac-openapi-test',
+                'fechaHoraInicio' => $uniqueHour,
+            ]);
+
+        $res->assertStatus(201)
+            ->assertJson([
+                'success' => true,
+                'data' => [
+                    'odontologo_id' => 'odo-openapi-test',
+                    'consultorio_id' => 'con-1',
+                    'paciente_id' => 'pac-openapi-test',
+                    'fecha_hora' => $uniqueHour,
+                    'estado' => 'RESERVADA',
+                ],
+            ]);
+    }
 }
