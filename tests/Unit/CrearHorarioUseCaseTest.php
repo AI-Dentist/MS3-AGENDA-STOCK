@@ -50,7 +50,7 @@ class CrearHorarioUseCaseTest extends TestCase
 
             public ?string $lastCallerToken = null;
 
-            public function validateReferences(string $odontologoId, string $consultorioId, string $callerBearerToken): void
+            public function validateReferences(string $odontologoId, string $consultorioId, string $callerBearerToken): array
             {
                 $this->lastCallerToken = $callerBearerToken;
 
@@ -61,6 +61,11 @@ class CrearHorarioUseCaseTest extends TestCase
                 if ($this->shouldFailValidation) {
                     throw new InvalidArgumentException("Referencia inválida para odontólogo {$odontologoId}");
                 }
+
+                return [
+                    'odontologo_id' => strtolower($odontologoId),
+                    'consultorio_id' => strtolower($consultorioId),
+                ];
             }
         };
 
@@ -125,6 +130,35 @@ class CrearHorarioUseCaseTest extends TestCase
             'hora_inicio' => '14:00',
             'hora_fin' => '12:00', // hora_inicio > hora_fin
         ], 'token');
+    }
+
+    public function test_rechaza_hora_inicio_con_formato_no_hh_mm(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->useCase->execute([
+            'odontologo_id' => '11111111-2222-3333-4444-555555555555',
+            'consultorio_id' => '99999999-8888-7777-6666-555555555555',
+            'especialidad' => 'Ortodoncia',
+            'fecha' => '2026-12-05',
+            'hora_inicio' => 'not-a-time',
+            'hora_fin' => '17:00',
+        ], 'token');
+    }
+
+    public function test_persiste_referencias_canonicas_resueltas_en_entidad(): void
+    {
+        $resultado = $this->useCase->execute([
+            'odontologo_id' => '11111111-2222-3333-4444-555555555555',
+            'consultorio_id' => '99999999-8888-7777-6666-555555555555',
+            'especialidad' => 'Ortodoncia',
+            'fecha' => '2026-12-05',
+            'hora_inicio' => '08:00',
+            'hora_fin' => '12:00',
+            'disponible' => true,
+        ], 'token-admin');
+
+        $this->assertEquals('11111111-2222-3333-4444-555555555555', $resultado['horario']['odontologo_id']);
+        $this->assertEquals('99999999-8888-7777-6666-555555555555', $resultado['horario']['consultorio_id']);
     }
 
     public function test_propaga_fallo_de_referencia_invalida_sin_guardar_registro(): void

@@ -42,22 +42,28 @@ class CrearHorarioUseCase
             throw new InvalidArgumentException("Formato de fecha inválido ('{$fecha}'). Se espera formato YYYY-MM-DD.");
         }
 
+        // Validar formato estricto HH:MM (24 horas)
+        $timeRegex = '/^(?:[01]\d|2[0-3]):[0-5]\d$/';
+        if (! preg_match($timeRegex, $horaInicio) || ! preg_match($timeRegex, $horaFin)) {
+            throw new InvalidArgumentException("Formato de hora inválido. Se espera formato estricto HH:MM (24 horas).");
+        }
+
         // Validar rango horario: hora_inicio < hora_fin
-        if (strtotime($horaInicio) >= strtotime($horaFin)) {
+        if ($horaInicio >= $horaFin) {
             throw new InvalidArgumentException("Rango horario inválido: la hora_inicio ('{$horaInicio}') debe ser anterior a la hora_fin ('{$horaFin}').");
         }
 
-        // Validar referencias canónicas y activas en MS1
-        $this->referenceValidator->validateReferences($odontologoId, $consultorioId, $callerBearerToken);
+        // Validar referencias canónicas y activas en MS1 y obtener sus IDs canónicos exactos
+        $canonicalRefs = $this->referenceValidator->validateReferences($odontologoId, $consultorioId, $callerBearerToken);
 
         // Generar identificador de servidor único sin sobreescribir registros existentes
         $nuevoId = 'hor-'.Str::uuid()->toString();
 
         $horario = new Horario(
             id: $nuevoId,
-            odontologoId: $odontologoId,
+            odontologoId: $canonicalRefs['odontologo_id'],
             especialidad: $especialidad,
-            consultorioId: $consultorioId,
+            consultorioId: $canonicalRefs['consultorio_id'],
             fecha: $fecha,
             horaInicio: $horaInicio,
             horaFin: $horaFin,

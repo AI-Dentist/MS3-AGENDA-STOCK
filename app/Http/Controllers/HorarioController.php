@@ -45,8 +45,8 @@ class HorarioController extends Controller
             'consultorio_id' => 'required|uuid',
             'especialidad' => 'required|string',
             'fecha' => 'required|date_format:Y-m-d',
-            'hora_inicio' => 'required|string',
-            'hora_fin' => 'required|string',
+            'hora_inicio' => ['required', 'string', 'regex:/^(?:[01]\d|2[0-3]):[0-5]\d$/'],
+            'hora_fin' => ['required', 'string', 'regex:/^(?:[01]\d|2[0-3]):[0-5]\d$/'],
             'disponible' => 'nullable|boolean',
         ]);
 
@@ -62,7 +62,7 @@ class HorarioController extends Controller
 
         $data = $validator->validated();
 
-        if (strtotime($data['hora_inicio']) >= strtotime($data['hora_fin'])) {
+        if ($data['hora_inicio'] >= $data['hora_fin']) {
             return response()->json([
                 'success' => false,
                 'error' => 'Rango horario inválido: la hora_inicio debe ser anterior a la hora_fin.',
@@ -83,7 +83,9 @@ class HorarioController extends Controller
         } catch (InvalidArgumentException $e) {
             $code = str_contains($e->getMessage(), 'odontólogo')
                 ? 'INVALID_ODONTOLOGO_REFERENCE'
-                : (str_contains($e->getMessage(), 'consultorio') ? 'INVALID_CONSULTORIO_REFERENCE' : 'INVALID_HORARIO_DATA');
+                : (str_contains($e->getMessage(), 'consultorio')
+                    ? 'INVALID_CONSULTORIO_REFERENCE'
+                    : (str_contains($e->getMessage(), 'Rango horario inválido') ? 'INVALID_TIME_RANGE' : 'INVALID_HORARIO_DATA'));
 
             return response()->json([
                 'success' => false,
@@ -94,7 +96,7 @@ class HorarioController extends Controller
         } catch (RuntimeException $e) {
             return response()->json([
                 'success' => false,
-                'error' => $e->getMessage(),
+                'error' => 'El servicio maestro ERP no se encuentra disponible o respondió de forma inesperada.',
                 'code' => 'UPSTREAM_ERP_UNAVAILABLE',
                 'timestamp' => now()->toIso8601String(),
             ], 502);

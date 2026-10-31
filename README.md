@@ -111,8 +111,9 @@ El microservicio utiliza **Amazon DynamoDB** como motor de almacenamiento NoSQL 
 
 ### Horarios, Inventario y Kardex
 - `GET /api/agendamiento/horarios`: Consultar horarios y turnos de odontólogos (filtro opcional `?odontologo_id=UUID`).
-- `POST /api/agendamiento/horarios`: Registrar nuevo turno de atención (exclusivo para rol `ADMIN`). Valida la vigencia activa del profesional y consultorio contra el catálogo maestro de MS1 ERP (`listarOdontologos(soloActivos: true)` y `listarConsultorios` con `estado='ACTIVO'`) propagando de forma aislada el Bearer token del llamador.
+- `POST /api/agendamiento/horarios`: Registrar nuevo turno de atención (exclusivo para rol `ADMIN`). Valida la vigencia activa del profesional y consultorio contra el catálogo maestro de MS1 ERP (`listarOdontologos(soloActivos: true)` y `listarConsultorios` con `estado='ACTIVO'`) propagando de forma aislada el Bearer token del llamador. Persiste de forma exacta los identificadores canónicos retornados por el master y garantiza enmascaramiento genérico 502 ante fallas upstream preservando la privacidad de URLs, tokens y canarios.
   - Payload JSON: `{ "odontologo_id": "UUID", "consultorio_id": "UUID", "especialidad": "string", "fecha": "YYYY-MM-DD", "hora_inicio": "HH:MM", "hora_fin": "HH:MM", "disponible": true }`.
+  - Invariantes de horario: `hora_inicio` y `hora_fin` requieren formato estricto `HH:MM` (24 horas) con regla de negocio `hora_inicio < hora_fin`.
   - Configuración MS1: `MS1_GRAPHQL_URL` (default: `http://127.0.0.1:8081/graphql`), `MS1_TIMEOUT_MS` (default: `2000`).
 - `GET /api/agendamiento/stock`: Consultar catálogo de insumos y alertas de reposición.
 - `POST /api/agendamiento/stock/movimientos`: Registrar movimientos manuales de inventario (`ENTRADA_COMPRA`, `SALIDA_PROCEDIMIENTO`, `AJUSTE`).

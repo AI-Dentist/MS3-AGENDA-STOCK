@@ -338,4 +338,161 @@ class HorarioApiTest extends TestCase
         $this->assertEquals("Bearer {$tokenB}", $capturedTokens[1]);
         $this->assertNotEquals($capturedTokens[0], $capturedTokens[1]);
     }
+
+    public function test_rechaza_hora_inicio_invalida_no_formato_reproduccion_clock(): void
+    {
+        $token = $this->generateJwt(['ADMIN']);
+
+        Http::fake([
+            '*/graphql' => Http::response([
+                'data' => [
+                    'listarOdontologos' => [
+                        ['id' => $this->validDoctorUuid, 'activo' => true],
+                    ],
+                    'listarConsultorios' => [
+                        ['id' => $this->validConsultorioUuid, 'estado' => 'ACTIVO'],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $repo = app(HorarioRepositoryInterface::class);
+        $totalAntes = count($repo->findAll());
+
+        $response = $this->withHeaders([
+            'Authorization' => "Bearer {$token}",
+        ])->postJson('/api/agendamiento/horarios', [
+            'odontologo_id' => $this->validDoctorUuid,
+            'consultorio_id' => $this->validConsultorioUuid,
+            'especialidad' => 'Ortodoncia',
+            'fecha' => '2026-11-20',
+            'hora_inicio' => 'not-a-time',
+            'hora_fin' => '17:00',
+        ]);
+
+        $response->assertStatus(422)
+            ->assertJson([
+                'success' => false,
+                'code' => 'INVALID_HORARIO_DATA',
+            ]);
+
+        $this->assertCount($totalAntes, $repo->findAll());
+    }
+
+    public function test_enmascara_errores_upstream_con_canario_sintetico_y_json_malformado_privacy(): void
+    {
+        $token = $this->generateJwt(['ADMIN']);
+        $syntheticCanary = 'SYNTHETIC_CANARY_SECRET_LEAK_XYZ_999';
+
+        $repo = app(HorarioRepositoryInterface::class);
+        $totalAntes = count($repo->findAll());
+
+        // Sub-caso 1: GraphQL error con canario sintético
+        Http::fake([
+            '*/graphql' => Http::response([
+                'errors' => [
+                    ['message' => "Upstream error details containing {$syntheticCanary}"],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders([
+            'Authorization' => "Bearer {$token}",
+        ])->postJson('/api/agendamiento/horarios', [
+            'odontologo_id' => $this->validDoctorUuid,
+            'consultorio_id' => $this->validConsultorioUuid,
+            'especialidad' => 'Ortodoncia',
+            'fecha' => '2026-11-20',
+            'hora_inicio' => '08:00',
+            'hora_fin' => '12:00',
+        ]);
+
+        $response->assertStatus(502)
+            ->assertJson([
+                'success' => false,
+                'code' => 'UPSTREAM_ERP_UNAVAILABLE',
+            ]);
+
+        $this->assertStringNotContainsString($syntheticCanary, (string) $response->getContent());
+        $this->assertCount($totalAntes, $repo->findAll());
+
+        // Sub-caso 2: Respuesta con catálogo malformado (no array) debe responder 502 enmascarado y no uncaught 500
+        Http::fake([
+            '*/graphql' => Http::response([
+                'data' => [
+                    'listarOdontologos' => 'malformed-string-not-an-array',
+                    'listarConsultorios' => null,
+                ],
+            ], 200),
+        ]);
+
+        $responseMalformed = $this->withHeaders([
+            'Authorization' => "Bearer {$token}",
+        ])->postJson('/api/agendamiento/horarios', [
+            'odontologo_id' => $this->validDoctorUuid,
+            'consultorio_id' => $this->validConsultorioUuid,
+            'especialidad' => 'Ortodoncia',
+            'fecha' => '2026-11-20',
+            'hora_inicio' => '08:00',
+            'hora_fin' => '12:00',
+        ]);
+
+        $responseMalformed->assertStatus(502)
+            ->assertJson([
+                'success' => false,
+                'code' => 'UPSTREAM_ERP_UNAVAILABLE',
+            ]);
+
+        $this->assertCount($totalAntes, $repo->findAll());
+    }
+
+    public function test_persiste_exact_bytes_canonicos_de_master_cuando_input_es_mayuscula_canonical(): void
+    {
+        $token = $this->generateJwt(['ADMIN']);
+
+        $masterDoctorUuid = strtolower($this->validDoctorUuid);
+        $masterConsultorioUuid = strtolower($this->validConsultorioUuid);
+
+        $inputDoctorUuid = strtoupper($this->validDoctorUuid);
+        $inputConsultorioUuid = strtoupper($this->validConsultorioUuid);
+
+        Http::fake([
+            '*/graphql' => Http::response([
+                'data' => [
+                    'listarOdontologos' => [
+                        ['id' => $masterDoctorUuid, 'activo' => true],
+                    ],
+                    'listarConsultorios' => [
+                        ['id' => $masterConsultorioUuid, 'estado' => 'ACTIVO'],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders([
+            'Authorization' => "Bearer {$token}",
+        ])->postJson('/api/agendamiento/horarios', [
+            'odontologo_id' => $inputDoctorUuid,
+            'consultorio_id' => $inputConsultorioUuid,
+            'especialidad' => 'Ortodoncia',
+            'fecha' => '2026-11-20',
+            'hora_inicio' => '08:00',
+            'hora_fin' => '12:00',
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertSame($masterDoctorUuid, $response->json('data.odontologo_id'));
+        $this->assertSame($masterConsultorioUuid, $response->json('data.consultorio_id'));
+
+        // Verificar que GET /api/agendamiento/horarios retorna exactamente los bytes canónicos del master
+        $getResponse = $this->withHeaders([
+            'Authorization' => "Bearer {$token}",
+        ])->getJson('/api/agendamiento/horarios?odontologo_id='.$masterDoctorUuid);
+
+        $getResponse->assertStatus(200);
+        $items = $getResponse->json('data.horarios');
+        $this->assertNotEmpty($items);
+        $this->assertSame($masterDoctorUuid, $items[0]['odontologo_id']);
+        $this->assertSame($masterConsultorioUuid, $items[0]['consultorio_id']);
+    }
 }
