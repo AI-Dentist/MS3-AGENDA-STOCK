@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    'ms1' => [
+        'graphql_url' => env('MS1_GRAPHQL_URL', 'http://127.0.0.1:8081/graphql'),
+        'timeout_ms' => (int) env('MS1_TIMEOUT_MS', 2000),
+    ],
+
 ];

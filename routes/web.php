@@ -22,6 +22,7 @@ Route::get('/health', function () {
 Route::prefix('api/agendamiento')->middleware('auth.keycloak')->group(function () {
     // 1. Horarios de Médicos y Disponibilidad
     Route::get('/horarios', [HorarioController::class, 'index']);
+    Route::post('/horarios', [HorarioController::class, 'store'])->middleware('auth.keycloak:ADMIN');
 
     // 2. Agenda y Citas Odontológicas (CRUD Completo y Ciclo Clínico)
     Route::middleware('auth.keycloak:ADMIN,RECEPCIONISTA,ODONTOLOGO')->group(function () {
