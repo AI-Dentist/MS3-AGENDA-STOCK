@@ -66,10 +66,18 @@ El microservicio utiliza **Amazon DynamoDB** como motor de almacenamiento NoSQL 
 
 ## 🔒 Seguridad y JWT Keycloak (RBAC)
 
-- Verificación criptográfica de tokens JWT con algoritmos **RS256** / **HS256** mediante `firebase/php-jwt`.
-- **Anti-Spoofing:** Rechazo tajante de cabeceras inyectadas `X-User-Roles` sin token Bearer válido.
-- Enlace del usuario autenticado en `$request->attributes` y `$request->setUserResolver()`.
-- Control de acceso por roles (`ADMIN`, `RECEPCIONISTA`, `ODONTOLOGO`, `ASISTENTE`).
+- **Verificación Criptográfica Estricta:** Validación de tokens JWT con algoritmos **RS256** (producción) y **HS256** (desarrollo local) mediante `firebase/php-jwt`.
+- **Política Estricta de Emisor (iss):** El emisor confiable se deriva de `${KEYCLOAK_BASE_URL}/realms/${KEYCLOAK_REALM}`. Cualquier token con `iss` ausente o no coincidente es rechazado con HTTP 401 (`INVALID_TOKEN`) antes de cualquier mutación o llamada a capas inferiores.
+- **Política Estricta de Audiencia de Recurso (aud):** La audiencia autorizada se define mediante la variable `KEYCLOAK_AUDIENCE` (por defecto `ms3-agenda-stock`). La audiencia de recurso **NO es el realm**. Se valida estrictamente pertenencia para valores de tipo string o array (`aud: "ms3-agenda-stock"` o `aud: ["ms3-agenda-stock", "account"]`). Tokens emitidos para otros microservicios o con audiencia genérica son rechazados con HTTP 401.
+- **Variables de Configuración (Sin Secretos):**
+  - `KEYCLOAK_BASE_URL`: URL base del Identity Provider (ejemplo sintético: `http://localhost:8180`).
+  - `KEYCLOAK_REALM`: Nombre del realm de Keycloak (ejemplo sintético: `dental-platform`).
+  - `KEYCLOAK_AUDIENCE`: Audiencia de recurso esperada por este microservicio (ejemplo sintético: `ms3-agenda-stock`).
+  - `KEYCLOAK_ALGORITHM`: Algoritmo criptográfico utilizado (por defecto: `RS256`).
+  - `KEYCLOAK_PUBLIC_KEY`: Clave pública RSA en formato PEM (o base64) para verificar firmas RS256.
+  - `KEYCLOAK_DEV_SECRET`: Secreto simétrico reservado exclusivamente para pruebas unitarias y entornos desconectados (HS256).
+- **Anti-Spoofing & Contexto:** Rechazo tajante de cabeceras inyectadas `X-User-Roles` sin token Bearer válido. Enlace seguro del usuario autenticado en `$request->attributes` y en el resolver de Laravel (`$request->setUserResolver()`).
+- **Control de Acceso por Roles (RBAC):** Normalización de roles eliminando prefijo `ROLE_` y homologando `DENTISTA` con `ODONTOLOGO`. Roles autorizados: `ADMIN`, `RECEPCIONISTA`, `ODONTOLOGO`, `ASISTENTE`.
 - **CORS W3C Estricto:** Eliminación de comodines (`*`) con `supports_credentials => true`, permitiendo exclusivamente orígenes confiables (`localhost:4200`, API Gateway).
 
 ---

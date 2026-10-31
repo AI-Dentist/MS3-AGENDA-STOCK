@@ -7,6 +7,7 @@ use Closure;
 use Firebase\JWT\JWT;
 use Firebase\JWT\Key;
 use Illuminate\Http\Request;
+use InvalidArgumentException;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -78,13 +79,14 @@ class KeycloakAuthMiddleware
             ], 401);
         }
 
-        // Verificación criptográfica estricta del Token JWT
+        // Verificación criptográfica estricta del Token JWT y validación de claims (iss, aud)
         try {
             $decoded = $this->verifyToken($token);
+            $this->validateClaims($decoded);
         } catch (Throwable $e) {
             return response()->json([
                 'success' => false,
-                'error' => 'Token JWT de Keycloak inválido o firma no verificable: '.$e->getMessage(),
+                'error' => 'Token JWT de Keycloak inválido o no autorizado: '.$e->getMessage(),
                 'code' => 'INVALID_TOKEN',
                 'timestamp' => now()->toIso8601String(),
             ], 401);
@@ -171,6 +173,52 @@ class KeycloakAuthMiddleware
         $devSecret = env('KEYCLOAK_DEV_SECRET', self::DEFAULT_DEV_SECRET);
 
         return JWT::decode($token, new Key($devSecret, 'HS256'));
+    }
+
+    /**
+     * Valida estrictamente los claims 'iss' (issuer) y 'aud' (audience) del token JWT.
+     *
+     * Reglas del ecosistema:
+     * - Emisor confiable: rtrim(KEYCLOAK_BASE_URL)/realms/KEYCLOAK_REALM
+     * - Audiencia del recurso: KEYCLOAK_AUDIENCE por defecto 'ms3-agenda-stock' (NO el nombre del realm).
+     * - Pertenencia estricta para string o array.
+     *
+     * @throws InvalidArgumentException
+     */
+    private function validateClaims(object $decoded): void
+    {
+        // 1. Validar claim 'iss' (Emisor confiable)
+        $baseUrl = rtrim(env('KEYCLOAK_BASE_URL', 'http://localhost:8180'), '/');
+        $realm = env('KEYCLOAK_REALM', 'dental-platform');
+        $expectedIssuer = "{$baseUrl}/realms/{$realm}";
+
+        if (empty($decoded->iss) || ! is_string($decoded->iss) || $decoded->iss !== $expectedIssuer) {
+            throw new InvalidArgumentException(
+                "Emisor (iss) no autorizado o ausente. Se esperaba '{$expectedIssuer}'."
+            );
+        }
+
+        // 2. Validar claim 'aud' (Audiencia del recurso: ms3-agenda-stock)
+        $expectedAudience = env('KEYCLOAK_AUDIENCE', 'ms3-agenda-stock');
+
+        if (! isset($decoded->aud)) {
+            throw new InvalidArgumentException(
+                "El claim de audiencia (aud) es obligatorio y debe incluir '{$expectedAudience}'."
+            );
+        }
+
+        $hasValidAudience = false;
+        if (is_string($decoded->aud)) {
+            $hasValidAudience = ($decoded->aud === $expectedAudience);
+        } elseif (is_array($decoded->aud)) {
+            $hasValidAudience = in_array($expectedAudience, $decoded->aud, true);
+        }
+
+        if (! $hasValidAudience) {
+            throw new InvalidArgumentException(
+                "La audiencia del token (aud) no contiene el recurso autorizado '{$expectedAudience}'."
+            );
+        }
     }
 
     /**
