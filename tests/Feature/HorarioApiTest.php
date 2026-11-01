@@ -126,7 +126,7 @@ class HorarioApiTest extends TestCase
                         ['id' => $this->validDoctorUuid, 'activo' => false],
                     ],
                     'listarConsultorios' => [
-                        ['id' => $this->validConsultorioUuid, 'estado' => 'ACTIVO'],
+                        ['id' => $this->validConsultorioUuid, 'estado' => 'DISPONIBLE'],
                     ],
                 ],
             ], 200),
@@ -241,7 +241,7 @@ class HorarioApiTest extends TestCase
                         ['id' => $this->validDoctorUuid, 'activo' => true],
                     ],
                     'listarConsultorios' => [
-                        ['id' => $this->validConsultorioUuid, 'estado' => 'ACTIVO'],
+                        ['id' => $this->validConsultorioUuid, 'estado' => 'DISPONIBLE'],
                     ],
                 ],
             ], 200),
@@ -304,7 +304,7 @@ class HorarioApiTest extends TestCase
                         ['id' => $this->validDoctorUuid, 'activo' => true],
                     ],
                     'listarConsultorios' => [
-                        ['id' => $this->validConsultorioUuid, 'estado' => 'ACTIVO'],
+                        ['id' => $this->validConsultorioUuid, 'estado' => 'DISPONIBLE'],
                     ],
                 ],
             ], 200);
@@ -350,7 +350,7 @@ class HorarioApiTest extends TestCase
                         ['id' => $this->validDoctorUuid, 'activo' => true],
                     ],
                     'listarConsultorios' => [
-                        ['id' => $this->validConsultorioUuid, 'estado' => 'ACTIVO'],
+                        ['id' => $this->validConsultorioUuid, 'estado' => 'DISPONIBLE'],
                     ],
                 ],
             ], 200),
@@ -463,7 +463,7 @@ class HorarioApiTest extends TestCase
                         ['id' => $masterDoctorUuid, 'activo' => true],
                     ],
                     'listarConsultorios' => [
-                        ['id' => $masterConsultorioUuid, 'estado' => 'ACTIVO'],
+                        ['id' => $masterConsultorioUuid, 'estado' => 'DISPONIBLE'],
                     ],
                 ],
             ], 200),
@@ -494,5 +494,139 @@ class HorarioApiTest extends TestCase
         $this->assertNotEmpty($items);
         $this->assertSame($masterDoctorUuid, $items[0]['odontologo_id']);
         $this->assertSame($masterConsultorioUuid, $items[0]['consultorio_id']);
+    }
+
+    public function test_permite_creacion_exitosa_con_consultorio_en_estado_disponible_reproduccion_red(): void
+    {
+        $token = $this->generateJwt(['ADMIN']);
+
+        Http::fake([
+            '*/graphql' => Http::response([
+                'data' => [
+                    'listarOdontologos' => [
+                        ['id' => $this->validDoctorUuid, 'activo' => true],
+                    ],
+                    'listarConsultorios' => [
+                        ['id' => $this->validConsultorioUuid, 'estado' => 'DISPONIBLE'],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders([
+            'Authorization' => "Bearer {$token}",
+        ])->postJson('/api/agendamiento/horarios', [
+            'odontologo_id' => $this->validDoctorUuid,
+            'consultorio_id' => $this->validConsultorioUuid,
+            'especialidad' => 'Ortodoncia',
+            'fecha' => '2026-11-20',
+            'hora_inicio' => '08:00',
+            'hora_fin' => '12:00',
+        ]);
+
+        $response->assertStatus(201);
+    }
+
+    public function test_permite_creacion_con_consultorio_en_mantenimiento_activo_en_erp(): void
+    {
+        $token = $this->generateJwt(['ADMIN']);
+
+        Http::fake([
+            '*/graphql' => Http::response([
+                'data' => [
+                    'listarOdontologos' => [
+                        ['id' => $this->validDoctorUuid, 'activo' => true],
+                    ],
+                    'listarConsultorios' => [
+                        ['id' => $this->validConsultorioUuid, 'estado' => 'MANTENIMIENTO'],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $response = $this->withHeaders([
+            'Authorization' => "Bearer {$token}",
+        ])->postJson('/api/agendamiento/horarios', [
+            'odontologo_id' => $this->validDoctorUuid,
+            'consultorio_id' => $this->validConsultorioUuid,
+            'especialidad' => 'Ortodoncia',
+            'fecha' => '2026-11-21',
+            'hora_inicio' => '14:00',
+            'hora_fin' => '18:00',
+        ]);
+
+        $response->assertStatus(201);
+        $this->assertEquals($this->validConsultorioUuid, $response->json('data.consultorio_id'));
+    }
+
+    public function test_rechaza_consultorio_con_estado_inventado_activo_o_desconocido(): void
+    {
+        $token = $this->generateJwt(['ADMIN']);
+        $repo = app(HorarioRepositoryInterface::class);
+        $totalAntes = count($repo->findAll());
+
+        // Caso A: Estado inventado 'ACTIVO' (no existe en ERP Consultorio.ESTADOS)
+        Http::fake([
+            '*/graphql' => Http::response([
+                'data' => [
+                    'listarOdontologos' => [
+                        ['id' => $this->validDoctorUuid, 'activo' => true],
+                    ],
+                    'listarConsultorios' => [
+                        ['id' => $this->validConsultorioUuid, 'estado' => 'ACTIVO'],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $responseActivo = $this->withHeaders([
+            'Authorization' => "Bearer {$token}",
+        ])->postJson('/api/agendamiento/horarios', [
+            'odontologo_id' => $this->validDoctorUuid,
+            'consultorio_id' => $this->validConsultorioUuid,
+            'especialidad' => 'Ortodoncia',
+            'fecha' => '2026-11-22',
+            'hora_inicio' => '08:00',
+            'hora_fin' => '12:00',
+        ]);
+
+        $responseActivo->assertStatus(422)
+            ->assertJson([
+                'success' => false,
+                'code' => 'INVALID_CONSULTORIO_REFERENCE',
+            ]);
+        $this->assertCount($totalAntes, $repo->findAll());
+
+        // Caso B: Estado desconocido 'DESCONOCIDO'
+        Http::fake([
+            '*/graphql' => Http::response([
+                'data' => [
+                    'listarOdontologos' => [
+                        ['id' => $this->validDoctorUuid, 'activo' => true],
+                    ],
+                    'listarConsultorios' => [
+                        ['id' => $this->validConsultorioUuid, 'estado' => 'DESCONOCIDO'],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $responseUnknown = $this->withHeaders([
+            'Authorization' => "Bearer {$token}",
+        ])->postJson('/api/agendamiento/horarios', [
+            'odontologo_id' => $this->validDoctorUuid,
+            'consultorio_id' => $this->validConsultorioUuid,
+            'especialidad' => 'Ortodoncia',
+            'fecha' => '2026-11-22',
+            'hora_inicio' => '08:00',
+            'hora_fin' => '12:00',
+        ]);
+
+        $responseUnknown->assertStatus(422)
+            ->assertJson([
+                'success' => false,
+                'code' => 'INVALID_CONSULTORIO_REFERENCE',
+            ]);
+        $this->assertCount($totalAntes, $repo->findAll());
     }
 }

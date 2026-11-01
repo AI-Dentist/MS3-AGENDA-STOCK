@@ -5,7 +5,7 @@ namespace App\Application\Ports;
 interface Ms1HorarioReferenceValidatorPort
 {
     /**
-     * Valida que el odontólogo exista y esté activo, y que el consultorio exista y esté en estado ACTIVO en MS1.
+     * Valida que el odontólogo exista y esté activo, y que el consultorio exista y esté en estado activo en MS1 (DISPONIBLE o MANTENIMIENTO).
      * Retorna los identificadores canónicos exactos retornados por el catálogo maestro de MS1 ERP.
      *
      * @param  string  $odontologoId  UUID del odontólogo canónico en MS1

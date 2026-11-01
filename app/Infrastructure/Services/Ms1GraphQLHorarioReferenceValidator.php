@@ -86,11 +86,12 @@ GRAPHQL;
             );
         }
 
-        // 2. Validar consultorio en estado ACTIVO (Consultorio usa estado=ACTIVO, sin columna activo) y capturar su UUID canónico exacto retornado por MS1
+        // 2. Validar consultorio activo en MS1 ERP (estados canónicos: DISPONIBLE, MANTENIMIENTO; INACTIVO/inventado ACTIVO/desconocido son rechazados)
         $canonicalConsultorioId = null;
         foreach ($consultorios as $con) {
             if (is_array($con) && isset($con['id']) && is_string($con['id']) && strcasecmp(trim($con['id']), trim($consultorioId)) === 0) {
-                if (strtoupper(trim((string) ($con['estado'] ?? ''))) === 'ACTIVO') {
+                $estado = strtoupper(trim((string) ($con['estado'] ?? '')));
+                if (in_array($estado, ['DISPONIBLE', 'MANTENIMIENTO'], true)) {
                     $canonicalConsultorioId = trim($con['id']);
                 }
                 break;
@@ -99,7 +100,7 @@ GRAPHQL;
 
         if ($canonicalConsultorioId === null) {
             throw new InvalidArgumentException(
-                "El consultorio con ID '{$consultorioId}' no existe o no se encuentra en estado ACTIVO en el catálogo del ERP (MS1)."
+                "El consultorio con ID '{$consultorioId}' no existe o no se encuentra activo (DISPONIBLE o MANTENIMIENTO) en el catálogo del ERP (MS1)."
             );
         }
 
