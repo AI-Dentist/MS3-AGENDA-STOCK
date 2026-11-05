@@ -107,6 +107,11 @@ El microservicio utiliza **Amazon DynamoDB** como motor de almacenamiento NoSQL 
 - `PATCH /api/agendamiento/citas/{id}/cancelar`: Cancelar una cita existente.
 - `PUT /api/agendamiento/citas/{id}/reprogramar`: Reprogramar a un nuevo horario verificando disponibilidad.
 - `PATCH /api/agendamiento/citas/{id}/completar`: Completar cita y descontar stock atómicamente en DynamoDB.
+  - Ejecuta un único `TransactWriteItems` atómico que transiciona la cita a `COMPLETADA` (`ConditionExpression: attribute_exists(id) AND estado <> :cancelado AND estado <> :completado`), descuenta cada insumo utilizado mediante CAS estricto sobre el snapshot leído (`ConditionExpression: attribute_exists(id) AND stock_actual = :previous AND stock_actual >= :cant`), e inserta cada salida en `movimientos_stock` (`ConditionExpression: attribute_not_exists(id)`).
+  - Elimina cualquier escritura incondicional de repositorio post-transacción, protegiendo deltas y previniendo que movimientos concurrentes sean sobreescritos.
+  - Garantiza fidelidad del Kardex (`stock_anterior` y `stock_posterior` reflejan el estado efectivamente persistido). Ante conflicto de concurrencia CAS o stock insuficiente, la transacción se cancela atómicamente retornando **400 `COMPLETION_ERROR`** sin efectos secundarios; el cliente debe releer el estado y no reintentar a ciegas.
+  - Fail-closed ante caídas de DynamoDB: si DynamoDB no está disponible (`isAvailable() === false` o error de conexión), responde **500 `INTERNAL_TRANSACTION_ERROR`** sin realizar escrituras en memoria ni confirmar la cita en falso. El modo en memoria queda restringido a entornos de prueba unitaria puros o configuración explícita (`DYNAMODB_FALLBACK_MEMORY=true`).
+  - Si el array `insumos` suministrado repite el mismo `insumo_id`, se preserva la última cantidad especificada para dicho identificador.
 - `PATCH /api/agendamiento/citas/{id}/no-asistio`: Registrar inasistencia del paciente (`NO_ASISTIO`).
 
 ### Horarios, Inventario y Kardex

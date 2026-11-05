@@ -37,6 +37,11 @@ class CompletarCitaYDescontarStockUseCase
      */
     public function execute(string $citaId, array $insumosUtilizados = [], ?string $usuarioId = null, ?string $motivo = null): array
     {
+        $dynamoAvailable = DynamoDbConnectionManager::isAvailable();
+        if (! $dynamoAvailable && ! $this->canUseInMemoryFallback()) {
+            throw new \RuntimeException('Fallo de persistencia al completar cita: servicio de base de datos no disponible.');
+        }
+
         $cita = $this->citaRepository->findById($citaId);
         if (! $cita) {
             throw new InvalidArgumentException("Cita no encontrada con ID: {$citaId}.");
@@ -104,20 +109,22 @@ class CompletarCitaYDescontarStockUseCase
             $stockPosterior = $insumo->stockActual - $cantidad;
             $movId = (string) Str::uuid();
 
-            // Descuento atómico con condición anti-negativos
+            // Descuento atómico con condición CAS sobre el snapshot leído y anti-negativos
             $transactItems[] = [
                 'Update' => [
                     'TableName' => 'insumos',
                     'Key' => $this->marshaler->marshalItem(['id' => $insumoId]),
-                    'UpdateExpression' => 'SET stock_actual = stock_actual - :cant',
-                    'ConditionExpression' => 'attribute_exists(id) AND stock_actual >= :cant',
+                    'UpdateExpression' => 'SET stock_actual = :next',
+                    'ConditionExpression' => 'attribute_exists(id) AND stock_actual = :previous AND stock_actual >= :cant',
                     'ExpressionAttributeValues' => $this->marshaler->marshalItem([
+                        ':next' => $stockPosterior,
+                        ':previous' => $insumo->stockActual,
                         ':cant' => $cantidad,
                     ]),
                 ],
             ];
 
-            // Inserción en tabla movimientos_stock
+            // Inserción en tabla movimientos_stock con garantía de id único
             $movArray = [
                 'id' => $movId,
                 'insumo_id' => $insumoId,
@@ -134,6 +141,7 @@ class CompletarCitaYDescontarStockUseCase
                 'Put' => [
                     'TableName' => 'movimientos_stock',
                     'Item' => $this->marshaler->marshalItem($movArray),
+                    'ConditionExpression' => 'attribute_not_exists(id)',
                 ],
             ];
 
@@ -144,56 +152,63 @@ class CompletarCitaYDescontarStockUseCase
         if (DynamoDbConnectionManager::isAvailable()) {
             try {
                 $this->dynamoDbClient->transactWriteItems([
+                    '@retries' => 0,
                     'TransactItems' => $transactItems,
                 ]);
-            } catch (DynamoDbException $e) {
-                if (str_contains($e->getMessage(), 'ConditionalCheckFailed') || $e->getAwsErrorCode() === 'TransactionCanceledException') {
-                    throw new InvalidArgumentException('Transacción DynamoDB rechazada: Stock insuficiente o cita ya completada/cancelada.');
+            } catch (DynamoDbException|AwsException $e) {
+                if (str_contains($e->getMessage(), 'ConditionalCheckFailed')
+                    || $e->getAwsErrorCode() === 'TransactionCanceledException'
+                    || str_contains($e->getMessage(), 'TransactionCanceledException')) {
+                    throw new InvalidArgumentException(
+                        'Transacción DynamoDB rechazada: Conflicto de concurrencia, stock insuficiente o cita ya completada/cancelada.',
+                        0,
+                        $e
+                    );
                 }
-                if (! $this->shouldFallback($e)) {
-                    throw $e;
-                }
+                // Si la transacción falla o tiene resultado incierto: FAIL CLOSED. Sin fallback a memoria.
+                throw new \RuntimeException('Fallo de persistencia al completar cita: servicio de base de datos no disponible.', 0, $e);
             } catch (Throwable $e) {
-                if (! $this->shouldFallback($e)) {
-                    throw $e;
-                }
+                throw new \RuntimeException('Fallo inesperado al completar cita: '.$e->getMessage(), 0, $e);
             }
-        }
 
-        // Actualizar entidades en repositorio y sincronizar estado
-        $cita->completar();
-        $this->citaRepository->save($cita);
+            // Sincronizar únicamente la entidad en memoria devuelta SIN escrituras redundantes a DynamoDB
+            $cita->completar();
+        } else {
+            // Entorno sin persistencia DynamoDB (repositorios simulados en memoria / unit tests puros)
+            $cita->completar();
+            $this->citaRepository->save($cita);
 
-        foreach ($insumoEntities as $insumoId => $data) {
-            /** @var Insumo $insumo */
-            $insumo = $data['entity'];
-            $cantidad = $data['cantidad'];
-            $stockPosterior = $insumo->stockActual - $cantidad;
+            foreach ($insumoEntities as $insumoId => $data) {
+                /** @var Insumo $insumo */
+                $insumo = $data['entity'];
+                $cantidad = $data['cantidad'];
+                $stockPosterior = $insumo->stockActual - $cantidad;
 
-            $updatedInsumo = new Insumo(
-                id: $insumo->id,
-                codigo: $insumo->codigo,
-                nombre: $insumo->nombre,
-                stockActual: $stockPosterior,
-                stockMinimo: $insumo->stockMinimo,
-                unidadMedida: $insumo->unidadMedida
-            );
-            $this->insumoRepository->save($updatedInsumo);
-        }
+                $updatedInsumo = new Insumo(
+                    id: $insumo->id,
+                    codigo: $insumo->codigo,
+                    nombre: $insumo->nombre,
+                    stockActual: $stockPosterior,
+                    stockMinimo: $insumo->stockMinimo,
+                    unidadMedida: $insumo->unidadMedida
+                );
+                $this->insumoRepository->save($updatedInsumo);
+            }
 
-        foreach ($generatedMovimientos as $mov) {
-            $movimientoEntity = new MovimientoStock(
-                id: $mov['id'],
-                insumoId: $mov['insumo_id'],
-                tipoMovimiento: $mov['tipo_movimiento'],
-                cantidad: $mov['cantidad'],
-                stockAnterior: $mov['stock_anterior'],
-                stockPosterior: $mov['stock_posterior'],
-                motivo: $mov['motivo'],
-                usuarioId: $mov['usuario_id'],
-                fechaHora: $mov['fecha_hora']
-            );
-            $this->movimientoRepository->save($movimientoEntity);
+            foreach ($generatedMovimientos as $mov) {
+                $movimientoEntity = new MovimientoStock(
+                    id: $mov['id'],
+                    insumoId: $mov['insumo_id'],
+                    tipoMovimiento: $mov['tipo_movimiento'],
+                    cantidad: $mov['cantidad'],
+                    stockAnterior: $mov['stock_anterior'],
+                    stockPosterior: $mov['stock_posterior'],
+                    motivo: $mov['motivo'],
+                    usuarioId: $mov['usuario_id'],
+                    fechaHora: $mov['fecha_hora']
+                );
+                $this->movimientoRepository->save($movimientoEntity);
+            }
         }
 
         return [
@@ -204,14 +219,18 @@ class CompletarCitaYDescontarStockUseCase
         ];
     }
 
-    private function shouldFallback(Throwable $e): bool
+    private function canUseInMemoryFallback(): bool
     {
-        $isTesting = env('APP_ENV') === 'testing'
-            || (function_exists('app') && method_exists(app(), 'environment') && app()->environment('testing'));
+        $explicitFallback = env('DYNAMODB_FALLBACK_MEMORY');
+        if ($explicitFallback !== null) {
+            return filter_var($explicitFallback, FILTER_VALIDATE_BOOLEAN);
+        }
 
-        return $e instanceof AwsException
-            || $e instanceof ConnectException
-            || $isTesting
-            || env('DYNAMODB_FALLBACK_MEMORY', true);
+        $appEnv = env('APP_ENV');
+        if ($appEnv === 'testing') {
+            return true;
+        }
+
+        return false;
     }
 }
