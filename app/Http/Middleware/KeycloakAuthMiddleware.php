@@ -19,6 +19,11 @@ class KeycloakAuthMiddleware
     public const DEFAULT_DEV_SECRET = 'ms3-agenda-stock-local-jwt-secret-key-2026';
 
     /**
+     * Default clock skew leeway in seconds for Keycloak JWT validation.
+     */
+    public const DEFAULT_JWT_LEEWAY = 60;
+
+    /**
      * Handle an incoming request.
      *
      * @param  Closure(Request): (Response)  $next
@@ -155,6 +160,10 @@ class KeycloakAuthMiddleware
      */
     private function verifyToken(string $token): object
     {
+        // Configurar tolerancia a desfasaje de reloj (clock skew) de 60s
+        $leeway = (int) env('KEYCLOAK_JWT_LEEWAY', self::DEFAULT_JWT_LEEWAY);
+        JWT::$leeway = $leeway;
+
         $rawKey = env('KEYCLOAK_PUBLIC_KEY');
         $algorithm = env('KEYCLOAK_ALGORITHM', 'RS256');
 
@@ -187,6 +196,11 @@ class KeycloakAuthMiddleware
      */
     private function validateClaims(object $decoded): void
     {
+        // 0. Validar expiración estricta ('exp') sin tolerancia para tokens vencidos
+        if (isset($decoded->exp) && $decoded->exp <= time()) {
+            throw new \Firebase\JWT\ExpiredException('Expired token');
+        }
+
         // 1. Validar claim 'iss' (Emisor confiable)
         $baseUrl = rtrim(env('KEYCLOAK_BASE_URL', 'http://localhost:8180'), '/');
         $realm = env('KEYCLOAK_REALM', 'dental-platform');

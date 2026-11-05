@@ -67,6 +67,7 @@ El microservicio utiliza **Amazon DynamoDB** como motor de almacenamiento NoSQL 
 ## 🔒 Seguridad y JWT Keycloak (RBAC)
 
 - **Verificación Criptográfica Estricta:** Validación de tokens JWT con algoritmos **RS256** (producción) y **HS256** (desarrollo local) mediante `firebase/php-jwt`.
+- **Tolerancia a Desfasaje de Reloj (Clock Skew Leeway):** Configuración de una tolerancia explícita de **60 segundos** (`KEYCLOAK_JWT_LEEWAY`, por defecto 60) en la validación de claims temporales (`iat` y `nbf`). Esto absorbe desfasajes entre contenedores Docker (donde Keycloak suele correr adelantado respecto al reloj del host) evitando errores 401 (`INVALID_TOKEN`) falsos positivos. Los tokens expirados (`exp`) se rechazan estrictamente sin tolerancia.
 - **Política Estricta de Emisor (iss):** El emisor confiable se deriva de `${KEYCLOAK_BASE_URL}/realms/${KEYCLOAK_REALM}`. Cualquier token con `iss` ausente o no coincidente es rechazado con HTTP 401 (`INVALID_TOKEN`) antes de cualquier mutación o llamada a capas inferiores.
 - **Política Estricta de Audiencia de Recurso (aud):** La audiencia autorizada se define mediante la variable `KEYCLOAK_AUDIENCE` (por defecto `ms3-agenda-stock`). La audiencia de recurso **NO es el realm**. Se valida estrictamente pertenencia para valores de tipo string o array (`aud: "ms3-agenda-stock"` o `aud: ["ms3-agenda-stock", "account"]`). Tokens emitidos para otros microservicios o con audiencia genérica son rechazados con HTTP 401.
 - **Variables de Configuración (Sin Secretos):**
