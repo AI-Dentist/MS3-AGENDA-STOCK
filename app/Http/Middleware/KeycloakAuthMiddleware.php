@@ -24,6 +24,16 @@ class KeycloakAuthMiddleware
     public const DEFAULT_JWT_LEEWAY = 60;
 
     /**
+     * Minimum allowed clock skew leeway in seconds.
+     */
+    public const MIN_JWT_LEEWAY = 0;
+
+    /**
+     * Maximum allowed clock skew leeway in seconds.
+     */
+    public const MAX_JWT_LEEWAY = 300;
+
+    /**
      * Handle an incoming request.
      *
      * @param  Closure(Request): (Response)  $next
@@ -156,32 +166,52 @@ class KeycloakAuthMiddleware
     }
 
     /**
+     * Resuelve y acota la tolerancia a desfasaje de reloj (leeway) en segundos.
+     * Si no está configurada, está vacía o no es numérica, se utiliza DEFAULT_JWT_LEEWAY (60).
+     * Valores numéricos se acotan estrictamente al rango [0, 300].
+     */
+    private function resolveLeeway(): int
+    {
+        $raw = env('KEYCLOAK_JWT_LEEWAY');
+
+        if ($raw === null || $raw === '' || ! is_numeric($raw)) {
+            return self::DEFAULT_JWT_LEEWAY;
+        }
+
+        return max(self::MIN_JWT_LEEWAY, min(self::MAX_JWT_LEEWAY, (int) $raw));
+    }
+
+    /**
      * Verifica la firma criptográfica del token usando la clave pública RS256 configurada o secreto local.
      */
     private function verifyToken(string $token): object
     {
-        // Configurar tolerancia a desfasaje de reloj (clock skew) de 60s
-        $leeway = (int) env('KEYCLOAK_JWT_LEEWAY', self::DEFAULT_JWT_LEEWAY);
-        JWT::$leeway = $leeway;
+        // Resguardar el valor previo de JWT::$leeway para no contaminar otros decoders del proceso
+        $previousLeeway = JWT::$leeway;
+        JWT::$leeway = $this->resolveLeeway();
 
-        $rawKey = env('KEYCLOAK_PUBLIC_KEY');
-        $algorithm = env('KEYCLOAK_ALGORITHM', 'RS256');
+        try {
+            $rawKey = env('KEYCLOAK_PUBLIC_KEY');
+            $algorithm = env('KEYCLOAK_ALGORITHM', 'RS256');
 
-        if ($rawKey) {
-            if ($algorithm === 'RS256' && ! str_starts_with(trim($rawKey), '-----BEGIN')) {
-                $formattedKey = "-----BEGIN PUBLIC KEY-----\n".wordwrap(trim($rawKey), 64, "\n", true)."\n-----END PUBLIC KEY-----";
-            } else {
-                $formattedKey = $rawKey;
+            if ($rawKey) {
+                if ($algorithm === 'RS256' && ! str_starts_with(trim($rawKey), '-----BEGIN')) {
+                    $formattedKey = "-----BEGIN PUBLIC KEY-----\n".wordwrap(trim($rawKey), 64, "\n", true)."\n-----END PUBLIC KEY-----";
+                } else {
+                    $formattedKey = $rawKey;
+                }
+                $key = new Key($formattedKey, $algorithm);
+
+                return JWT::decode($token, $key);
             }
-            $key = new Key($formattedKey, $algorithm);
 
-            return JWT::decode($token, $key);
+            // Si no se configuró clave pública en .env, verificar con secreto HMAC local de desarrollo
+            $devSecret = env('KEYCLOAK_DEV_SECRET', self::DEFAULT_DEV_SECRET);
+
+            return JWT::decode($token, new Key($devSecret, 'HS256'));
+        } finally {
+            JWT::$leeway = $previousLeeway;
         }
-
-        // Si no se configuró clave pública en .env, verificar con secreto HMAC local de desarrollo
-        $devSecret = env('KEYCLOAK_DEV_SECRET', self::DEFAULT_DEV_SECRET);
-
-        return JWT::decode($token, new Key($devSecret, 'HS256'));
     }
 
     /**
