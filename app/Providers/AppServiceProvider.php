@@ -7,11 +7,13 @@ use App\Domain\Repositories\CitaRepositoryInterface;
 use App\Domain\Repositories\HorarioRepositoryInterface;
 use App\Domain\Repositories\InsumoRepositoryInterface;
 use App\Domain\Repositories\MovimientoStockRepositoryInterface;
+use App\Domain\Repositories\StockMovementWriterInterface;
 use App\Domain\Services\MlInferenceServiceInterface;
 use App\Infrastructure\Persistence\DynamoDB\DynamoDbCitaRepository;
 use App\Infrastructure\Persistence\DynamoDB\DynamoDbHorarioRepository;
 use App\Infrastructure\Persistence\DynamoDB\DynamoDbInsumoRepository;
 use App\Infrastructure\Persistence\DynamoDB\DynamoDbMovimientoStockRepository;
+use App\Infrastructure\Persistence\DynamoDB\DynamoDbStockMovementWriter;
 use App\Infrastructure\Services\FastApiMlService;
 use App\Infrastructure\Services\Ms1GraphQLHorarioReferenceValidator;
 use Illuminate\Support\ServiceProvider;
@@ -27,6 +29,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(HorarioRepositoryInterface::class, DynamoDbHorarioRepository::class);
         $this->app->bind(InsumoRepositoryInterface::class, DynamoDbInsumoRepository::class);
         $this->app->bind(MovimientoStockRepositoryInterface::class, DynamoDbMovimientoStockRepository::class);
+        $this->app->bind(StockMovementWriterInterface::class, DynamoDbStockMovementWriter::class);
         $this->app->bind(MlInferenceServiceInterface::class, FastApiMlService::class);
         $this->app->bind(Ms1HorarioReferenceValidatorPort::class, Ms1GraphQLHorarioReferenceValidator::class);
     }

@@ -7,10 +7,13 @@ use App\Domain\Entities\Insumo;
 use App\Domain\Repositories\CitaRepositoryInterface;
 use App\Domain\Repositories\InsumoRepositoryInterface;
 use Illuminate\Support\Str;
+use Tests\Support\StockMovementTestEnvironment;
 use Tests\TestCase;
 
 class StockKardexApiTest extends TestCase
 {
+    use StockMovementTestEnvironment;
+
     private InsumoRepositoryInterface $insumoRepo;
 
     private CitaRepositoryInterface $citaRepo;
@@ -18,12 +21,16 @@ class StockKardexApiTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->actor('synthetic-kardex-actor');
         $this->insumoRepo = $this->app->make(InsumoRepositoryInterface::class);
         $this->citaRepo = $this->app->make(CitaRepositoryInterface::class);
     }
 
     public function test_registra_movimiento_de_entrada_y_actualiza_kardex(): void
     {
+        // Este endpoint ahora exige persistencia; inyectar SDK sintético explícito.
+        $this->useStockMovementDatabase();
+        $this->insumoRepo = $this->app->make(InsumoRepositoryInterface::class);
         $insumoId = 'ins-test-kardex-1';
         $insumo = new Insumo(
             id: $insumoId,
