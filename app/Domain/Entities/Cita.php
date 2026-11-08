@@ -34,7 +34,11 @@ class Cita
         public readonly string $consultorioId,
         public readonly string $pacienteId,
         public string $fechaHora,
-        public string $estado = self::ESTADO_RESERVADA
+        public string $estado = self::ESTADO_RESERVADA,
+        // Optional fields for ML enrichment (S10 / L12)
+        public readonly ?int $duracionEstimadaMin = null,
+        public readonly ?string $tipoTratamiento = null,
+        public readonly ?string $reservadaEn = null,
     ) {
         if (! in_array($this->estado, self::ESTADOS_VALIDOS, true)) {
             throw new InvalidArgumentException("Estado de cita no válido: {$this->estado}");
@@ -78,7 +82,7 @@ class Cita
 
     public function toArray(): array
     {
-        return [
+        $data = [
             'id' => $this->id,
             'idempotency_key' => $this->idempotencyKey,
             'odontologo_id' => $this->odontologoId,
@@ -87,5 +91,17 @@ class Cita
             'fecha_hora' => $this->fechaHora,
             'estado' => $this->estado,
         ];
+
+        if ($this->duracionEstimadaMin !== null) {
+            $data['duracion_estimada_min'] = $this->duracionEstimadaMin;
+        }
+        if ($this->tipoTratamiento !== null) {
+            $data['tipo_tratamiento'] = $this->tipoTratamiento;
+        }
+        if ($this->reservadaEn !== null) {
+            $data['reservada_en'] = $this->reservadaEn;
+        }
+
+        return $data;
     }
 }

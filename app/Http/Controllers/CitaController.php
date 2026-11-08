@@ -9,6 +9,7 @@ use App\Application\UseCases\ReprogramarCitaUseCase;
 use App\Domain\Entities\Cita;
 use App\Domain\Exceptions\CitaCollisionException;
 use App\Domain\Repositories\CitaRepositoryInterface;
+use App\Domain\Services\MlInferenceServiceInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
@@ -20,7 +21,8 @@ class CitaController extends Controller
         private AgendarCitaUseCase $agendarCitaUseCase,
         private CancelarCitaUseCase $cancelarCitaUseCase,
         private ReprogramarCitaUseCase $reprogramarCitaUseCase,
-        private CitaRepositoryInterface $citaRepository
+        private CitaRepositoryInterface $citaRepository,
+        private MlInferenceServiceInterface $mlService
     ) {}
 
     public function index(): JsonResponse
@@ -28,14 +30,77 @@ class CitaController extends Controller
         $citas = $this->citaRepository->findAll();
         $citasArray = array_map(fn ($cita) => $cita->toArray(), $citas);
 
+        $mlDisponible = false;
+        $predictionsByCitaId = [];
+
+        try {
+            $health = $this->mlService->checkHealth();
+            $mlDisponible = ($health['status'] ?? '') === 'UP';
+
+            if (! empty($citasArray)) {
+                $batchPayload = array_map(function ($c) {
+                    $fechaHora = $c['fecha_hora'] ?? '2027-01-01 10:00:00';
+                    try {
+                        $dt = new \DateTime($fechaHora);
+                    } catch (Throwable $e) {
+                        $dt = new \DateTime();
+                    }
+
+                    return [
+                        'cita_id' => (string) $c['id'],
+                        'paciente_id' => (string) ($c['paciente_id'] ?? 'pac-unknown'),
+                        'edad' => 35,
+                        'dias_anticipacion' => 7,
+                        'cancelaciones_previas' => 0,
+                        'dia_semana' => (int) $dt->format('N'),
+                        'hora_cita' => (int) $dt->format('G'),
+                        'tipo_tratamiento_riesgo' => 1,
+                        'duracion_minutos' => isset($c['duracion_estimada_min']) ? (int) $c['duracion_estimada_min'] : 30,
+                        'banda_horaria' => (int) $dt->format('G') >= 13 ? 1 : 0,
+                    ];
+                }, $citasArray);
+
+                $batchResult = $this->mlService->predictNoShowBatch($batchPayload);
+                $mlDisponible = true;
+                foreach ($batchResult['predicciones'] ?? [] as $pred) {
+                    $cid = $pred['cita_id'] ?? null;
+                    if ($cid) {
+                        $predictionsByCitaId[$cid] = $pred;
+                    }
+                }
+            }
+        } catch (Throwable $e) {
+            $mlDisponible = false;
+        }
+
+        $enrichedCitas = array_map(function ($cita) use ($mlDisponible, $predictionsByCitaId) {
+            if ($mlDisponible) {
+                $pred = $predictionsByCitaId[$cita['id']] ?? [];
+                $prob = $pred['probabilidadNoShow'] ?? $pred['probabilidad_inasistencia'] ?? null;
+                $risk = $pred['nivelRiesgo'] ?? $pred['nivel_riesgo'] ?? null;
+                $accion = $pred['accionRecomendada'] ?? $pred['recomendacion_operativa'] ?? null;
+
+                $cita['probabilidadNoShow'] = $prob;
+                $cita['nivelRiesgo'] = $risk;
+                $cita['accionRecomendada'] = $accion;
+            } else {
+                $cita['probabilidadNoShow'] = null;
+                $cita['nivelRiesgo'] = null;
+                $cita['accionRecomendada'] = null;
+            }
+
+            return $cita;
+        }, $citasArray);
+
         return response()->json([
             'success' => true,
             'data' => [
-                'citas' => $citasArray,
-                'total' => count($citasArray),
+                'citas' => $enrichedCitas,
+                'total' => count($enrichedCitas),
+                'mlDisponible' => $mlDisponible,
             ],
-            'citas' => $citasArray,
-            'total' => count($citasArray),
+            'citas' => $enrichedCitas,
+            'total' => count($enrichedCitas),
             'timestamp' => now()->toIso8601String(),
         ], 200);
     }

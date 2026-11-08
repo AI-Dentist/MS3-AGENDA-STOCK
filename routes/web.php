@@ -45,7 +45,9 @@ Route::prefix('api/agendamiento')->middleware('auth.keycloak')->group(function (
     // 4. Módulo de Machine Learning (Supervisado y No Supervisado)
     Route::prefix('ml')->group(function () {
         Route::get('/health', [MachineLearningController::class, 'health']);
+        Route::post('/predict-noshow', [MachineLearningController::class, 'predictNoShow']);
         Route::post('/predict-no-show', [MachineLearningController::class, 'predictNoShow']);
+        Route::get('/clusters', [MachineLearningController::class, 'clusters']);
         Route::post('/cluster-paciente', [MachineLearningController::class, 'clusterPatient']);
         Route::post('/cluster-stock', [MachineLearningController::class, 'clusterStock']);
     });

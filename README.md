@@ -85,26 +85,39 @@ El microservicio utiliza **Amazon DynamoDB** como motor de almacenamiento NoSQL 
 
 ## 🚀 Modelos de Machine Learning Incorporados
 
-1. **Supervisado (Predicción de Inasistencias / No-Show):**
+> [!NOTE]
+> **Datos de Entrenamiento:** Todos los modelos supervisados y no supervisados fueron entrenados con **DATOS SINTÉTICOS** (`datosSinteticos: true`), generado determinísticamente para el entorno de portfolio odontológico.
+
+1. **Supervisado (Predicción de Inasistencias / No-Show - S10):**
    - **Algoritmo:** `RandomForestClassifier` optimizado dentro de un `Pipeline` con `StandardScaler`.
-   - **Variables:** Edad del paciente, días de anticipación de reserva, historial de cancelaciones previas, día de la semana, hora de la cita y nivel de complejidad del tratamiento.
-   - **Salida:** Probabilidad de inasistencia (0.0 a 1.0), clasificación de riesgo (`BAJO`, `MEDIO`, `ALTO`) y recomendación operativa de sobrecupo o confirmación preventiva.
+   - **Variables:** Historial de cancelaciones previas, días de anticipación, día de la semana, hora de la cita, banda horaria (mañana/tarde), duración estimada en minutos, tipo de tratamiento / riesgo y edad del paciente. Si un parámetro no se proporciona, se calcula/imputa automáticamente y se registra en `featuresImputadas`.
+   - **Salida:** Campos canónicos `probabilidadNoShow` (0.0000 a 1.0000), `nivelRiesgo` (`BAJO`, `MEDIO`, `ALTO`), `accionRecomendada` y `featuresImputadas` (conservando aliases heredados en snake_case para retrocompatibilidad).
+   - **Umbrales Canónicos (S10):**
+     * `BAJO`: `probabilidad < 0.35` -> Acción: *"Horario seguro"*.
+     * `MEDIO`: `0.35 <= probabilidad <= 0.65` (0.65 es MEDIO) -> Acción: *"Enviar recordatorio por WhatsApp 48h antes"*.
+     * `ALTO`: `probabilidad > 0.65` -> Acción: *"Confirmar por teléfono/WhatsApp 24h antes"*.
 
-2. **No Supervisado (Segmentación de Pacientes):**
-   - **Algoritmo:** `K-Means Clustering` ($k=3$) con **centroides ordenados por peso semántico** (`total_citas * gasto_total_usd`).
-   - **Garantía Determinística:** Pacientes de alta frecuencia y compromiso siempre son asignados al Clúster 0 ("Paciente Frecuente / Alto Compromiso"), mientras que perfiles de abandono son asignados al Clúster 2 ("Paciente en Riesgo de Deserción").
+2. **No Supervisado (Segmentación de Pacientes - S11):**
+   - **Algoritmo:** `K-Means Clustering` ($k=3$) con centroides ordenados semánticamente por frecuencia y gasto estimado.
+   - **Nombres Exactos de Clúster:**
+     * `Frecuente y Puntual`: Pacientes de alta asistencia y visitas periódicas.
+     * `Riesgo de Abandono / Inconstante`: Pacientes con asistencias irregulares o intervalos prolongados.
+     * `Atención Esporádica / Urgencias`: Pacientes con baja frecuencia orientados a urgencias.
 
-3. **No Supervisado (Clasificación ABC de Inventario):**
-   - **Algoritmo:** `K-Means Clustering` ($k=3$) con ordenamiento por valor monetario de rotación (`consumo_mensual * costo_unitario`).
-   - **Garantía Determinística:** Clúster 0 representa Categoría A (Alto Valor / Rotación Crítica), Clúster 1 Categoría B y Clúster 2 Categoría C.
+3. **No Supervisado (Clasificación ABC de Inventario - S11):**
+   - **Algoritmo:** `K-Means Clustering` ($k=3$) con centroides ordenados por valor de rotación (`consumo_mensual * costo_unitario`).
+   - **Nombres Exactos de Clúster:**
+     * `Alta Rotación Crítica`: Insumos de alto consumo e impacto operativo inmediato (Categoría A).
+     * `Consumo Estándar`: Insumos de rotación media y costo moderado (Categoría B).
+     * `Baja Rotación`: Insumos de uso ocasional o reposición espaciada (Categoría C).
 
 ---
 
 ## 📡 Catálogo de Endpoints REST (`/api/agendamiento/**`)
 
 ### Agenda y Citas
-- `GET /api/agendamiento/citas`: Listar citas registradas.
-- `POST /api/agendamiento/citas`: Crear cita con `Idempotency-Key`, validación de turnos del odontólogo y prevención de colisiones (`409 Conflict`).
+- `GET /api/agendamiento/citas`: Listar citas registradas. Enriquecido automáticamente con inferencias ML (`probabilidadNoShow`, `nivelRiesgo`, `accionRecomendada`) y metadato `mlDisponible: true`. Si el micro-sidecar no está disponible, responde exitosamente HTTP 200 con campos ML en `null` y `mlDisponible: false`.
+- `POST /api/agendamiento/citas`: Crear cita con `Idempotency-Key`, validación de turnos del odontólogo y prevención de colisiones (`409 Conflict`). Opcionalmente admite `duracionEstimadaMin`, `tipoTratamiento` y `reservadaEn` para enriquecimiento de features ML.
 - `PATCH /api/agendamiento/citas/{id}/cancelar`: Cancelar una cita existente.
 - `PUT /api/agendamiento/citas/{id}/reprogramar`: Reprogramar a un nuevo horario verificando disponibilidad.
 - `PATCH /api/agendamiento/citas/{id}/completar`: Completar cita y descontar stock atómicamente en DynamoDB.
@@ -134,7 +147,8 @@ El microservicio utiliza **Amazon DynamoDB** como motor de almacenamiento NoSQL 
 
 ### Machine Learning
 - `GET /api/agendamiento/ml/health`: Estado del motor de inferencia y modelos cargados en memoria.
-- `POST /api/agendamiento/ml/predict-no-show`: Estimar probabilidad de inasistencia de una cita.
+- `POST /api/agendamiento/ml/predict-noshow`: Estimar probabilidad de inasistencia de una cita (S10). Alias retrocompatible: `POST /api/agendamiento/ml/predict-no-show`. Ante caída del sidecar responde **503 `ML_SERVICE_UNAVAILABLE`**.
+- `GET /api/agendamiento/ml/clusters`: Obtener centroides, distribución y asignaciones de clústeres para pacientes e inventario desde DynamoDB (S11). Ante caída del sidecar responde **503 `ML_SERVICE_UNAVAILABLE`**.
 - `POST /api/agendamiento/ml/cluster-paciente`: Segmentación de comportamiento de paciente.
 - `POST /api/agendamiento/ml/cluster-stock`: Clasificación ABC de criticidad de insumos.
 

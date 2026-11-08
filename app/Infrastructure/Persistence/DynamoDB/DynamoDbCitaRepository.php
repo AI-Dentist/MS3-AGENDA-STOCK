@@ -254,7 +254,10 @@ class DynamoDbCitaRepository implements CitaRepositoryInterface
             consultorioId: $data['consultorio_id'],
             pacienteId: $data['paciente_id'],
             fechaHora: $data['fecha_hora'],
-            estado: $data['estado'] ?? Cita::ESTADO_RESERVADA
+            estado: $data['estado'] ?? Cita::ESTADO_RESERVADA,
+            duracionEstimadaMin: isset($data['duracion_estimada_min']) ? (int) $data['duracion_estimada_min'] : null,
+            tipoTratamiento: $data['tipo_tratamiento'] ?? null,
+            reservadaEn: $data['reservada_en'] ?? null,
         );
     }
 

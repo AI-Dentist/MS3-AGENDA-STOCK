@@ -28,3 +28,7 @@ Thumbs.db
 /storage/app/dynamodb_*.json
 __pycache__/
 *.pyc
+.atl/
+ml_service/.venv/
+.pytest_cache/
+

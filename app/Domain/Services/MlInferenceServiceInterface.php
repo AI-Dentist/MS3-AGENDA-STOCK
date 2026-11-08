@@ -7,42 +7,46 @@ interface MlInferenceServiceInterface
     /**
      * Predice la probabilidad de inasistencia (No-Show) usando Random Forest.
      *
-     * @param array{
-     *     edad: int,
-     *     dias_anticipacion: int,
-     *     cancelaciones_previas: int,
-     *     dia_semana: int,
-     *     hora_cita: int,
-     *     tipo_tratamiento_riesgo: int
-     * } $data
+     * @param array $data
+     * @return array
      */
     public function predictNoShow(array $data): array;
 
     /**
+     * Predice en lote la probabilidad de inasistencia (No-Show) para una lista de citas.
+     *
+     * @param array<int, array> $citas
+     * @return array
+     */
+    public function predictNoShowBatch(array $citas): array;
+
+    /**
      * Segmenta el perfil de un paciente usando K-Means Clustering.
      *
-     * @param array{
-     *     total_citas: int,
-     *     tasa_asistencia: float,
-     *     dias_promedio_entre_citas: float,
-     *     gasto_total_usd: float
-     * } $data
+     * @param array $data
+     * @return array
      */
     public function clusterPatient(array $data): array;
 
     /**
      * Clasifica un insumo de inventario según rotación y criticidad (K-Means / ABC).
      *
-     * @param array{
-     *     consumo_mensual: float,
-     *     costo_unitario: float,
-     *     dias_reabastecimiento: int
-     * } $data
+     * @param array $data
+     * @return array
      */
     public function clusterStock(array $data): array;
 
     /**
+     * Obtiene los clusters completos (pacientes e insumos) con centroides, distribución y asignaciones.
+     *
+     * @return array
+     */
+    public function getClusters(): array;
+
+    /**
      * Verifica el estado del micro-servicio de Machine Learning.
+     *
+     * @return array
      */
     public function checkHealth(): array;
 }
