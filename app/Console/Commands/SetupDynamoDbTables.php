@@ -29,10 +29,21 @@ class SetupDynamoDbTables extends Command
         $this->info('Iniciando configuración de tablas en DynamoDB...');
 
         try {
-            $existingTables = $client->listTables()['TableNames'] ?? [];
+            $existingTables = [];
+            $lastEvaluatedTableName = null;
+            do {
+                $params = [];
+                if ($lastEvaluatedTableName) {
+                    $params['ExclusiveStartTableName'] = $lastEvaluatedTableName;
+                }
+                $result = $client->listTables($params);
+                $existingTables = array_merge($existingTables, $result['TableNames'] ?? []);
+                $lastEvaluatedTableName = $result['LastEvaluatedTableName'] ?? null;
+            } while ($lastEvaluatedTableName);
         } catch (Throwable $e) {
             $this->error('No se pudo conectar a DynamoDB: '.$e->getMessage());
-            $this->warn('Verifica que dynamodb-local esté activo en '.env('DYNAMODB_ENDPOINT', 'http://127.0.0.1:8002'));
+            $endpoint = env('DYNAMODB_ENDPOINT') ?: 'AWS DynamoDB ('.env('AWS_DEFAULT_REGION', 'us-east-1').')';
+            $this->warn('Verifica la conectividad con DynamoDB en '.$endpoint);
 
             return 1;
         }
@@ -141,7 +152,11 @@ class SetupDynamoDbTables extends Command
                 $client->createTable($schema);
                 $this->info("  [CREADA] Tabla '{$name}' creada con éxito.");
             } catch (DynamoDbException $e) {
-                $this->error("  [ERROR] Error al crear tabla '{$name}': ".$e->getMessage());
+                if ($e->getAwsErrorCode() === 'ResourceInUseException') {
+                    $this->line("  -> Tabla '{$name}' ya existe en DynamoDB (ResourceInUseException). Omitiendo creación.");
+                } else {
+                    $this->error("  [ERROR] Error al crear tabla '{$name}': ".$e->getMessage());
+                }
             }
         }
 
