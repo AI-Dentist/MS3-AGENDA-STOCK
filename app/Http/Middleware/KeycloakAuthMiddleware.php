@@ -205,6 +205,11 @@ class KeycloakAuthMiddleware
                 return JWT::decode($token, $key);
             }
 
+            // En entorno de producción, NUNCA permitir bypass mediante el secreto dev HMAC local
+            if (app()->environment('production')) {
+                throw new InvalidArgumentException('Clave pública de Keycloak no configurada en entorno de producción.');
+            }
+
             // Si no se configuró clave pública en .env, verificar con secreto HMAC local de desarrollo
             $devSecret = env('KEYCLOAK_DEV_SECRET', self::DEFAULT_DEV_SECRET);
 
@@ -232,9 +237,14 @@ class KeycloakAuthMiddleware
         }
 
         // 1. Validar claim 'iss' (Emisor confiable)
-        $baseUrl = rtrim(env('KEYCLOAK_BASE_URL', 'http://localhost:8180'), '/');
-        $realm = env('KEYCLOAK_REALM', 'dental-platform');
-        $expectedIssuer = "{$baseUrl}/realms/{$realm}";
+        $issuerUri = env('KEYCLOAK_ISSUER_URI');
+        if (! empty($issuerUri)) {
+            $expectedIssuer = rtrim($issuerUri, '/');
+        } else {
+            $baseUrl = rtrim(env('KEYCLOAK_BASE_URL', 'http://localhost:8180'), '/');
+            $realm = env('KEYCLOAK_REALM', 'dental-platform');
+            $expectedIssuer = "{$baseUrl}/realms/{$realm}";
+        }
 
         if (empty($decoded->iss) || ! is_string($decoded->iss) || $decoded->iss !== $expectedIssuer) {
             throw new InvalidArgumentException(
