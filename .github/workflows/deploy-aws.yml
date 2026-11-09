@@ -1,0 +1,27 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy via rsync and SSH
+        env:
+          AWS_SSH_KEY: ${{ secrets.AWS_SSH_KEY }}
+          AWS_HOST: 100.60.248.245
+          AWS_USER: ubuntu
+          DEPLOY_PATH: /home/ubuntu/deploy/MS3-AGENDA-STOCK
+        run: |
+          mkdir -p ~/.ssh
+          echo "$AWS_SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "$AWS_HOST" >> ~/.ssh/known_hosts
+          rsync -az --delete --exclude .git --exclude .env -e "ssh -i ~/.ssh/id_rsa" ./ "$AWS_USER@$AWS_HOST:$DEPLOY_PATH/"
+          ssh -i ~/.ssh/id_rsa "$AWS_USER@$AWS_HOST" "cd $DEPLOY_PATH && docker compose up -d --build --remove-orphans"

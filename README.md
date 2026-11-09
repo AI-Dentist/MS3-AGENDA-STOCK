@@ -185,3 +185,42 @@ php artisan test
 # Pruebas del Sidecar de ML (FastAPI TestClient)
 python ml_service/test_ml_service.py
 ```
+
+---
+
+## 🚀 Despliegue en Producción (AWS EC2)
+
+### Arquitectura de Producción
+- **Host**: AWS EC2 `100.60.248.245` (`us-east-1`), bajo el stack `dental-ms3`.
+- **Red Externa Docker**: `dental-net` (sin puertos expuestos al host; tráfico enrutado vía Caddy reverse proxy `edge`).
+- **Base de Datos**: Amazon DynamoDB Nativo en `us-east-1`, autenticado mediante la cadena por defecto del AWS SDK que resuelve el IAM Role de la instancia EC2 vía IMDSv2. Sin credenciales estáticas ni endpoints locales.
+- **Microservicios**:
+  - `ms3-agenda` (Laravel): puerto interno 8001.
+  - `ml-service` (FastAPI sidecar): puerto interno 8000.
+- **Autenticación Keycloak**: Sin Keycloak en AWS; el servicio arranca normalmente, valida el emisor mediante `KEYCLOAK_ISSUER_URI`, y responde `401 Unauthorized` ante cualquier petición a rutas protegidas sin token válido.
+
+### Creación Idempotente de Tablas DynamoDB (PAY_PER_REQUEST)
+Para aprovisionar las 4 tablas DynamoDB (`citas`, `horarios`, `insumos`, `movimientos_stock`) con facturación por petición (`PAY_PER_REQUEST`) e índices secundarios globales (GSIs):
+
+```bash
+# 1. Creación idempotente de tablas
+docker compose run --rm ms3-agenda php artisan dynamodb:setup
+
+# 2. (Opcional) Creación y siembra de datos de prueba
+docker compose run --rm ms3-agenda php artisan dynamodb:setup --seed
+```
+
+### Configuración de Entorno (.env)
+En la raíz del repositorio en el servidor de despliegue (`/home/ubuntu/deploy/MS3-AGENDA-STOCK`):
+```bash
+cp deploy/aws/env.template .env
+# Generar o configurar APP_KEY
+php artisan key:generate
+```
+El archivo `.env` define `COMPOSE_FILE=deploy/aws/compose.yml` para que `docker compose up -d --build` opere directamente con la configuración de producción.
+
+### CI/CD con GitHub Actions
+El flujo `.github/workflows/deploy-aws.yml` automatiza el despliegue ante cada push a la rama `main`:
+1. Realiza checkout del repositorio vía `actions/checkout@v4`.
+2. Sincroniza el código fuente hacia la instancia AWS mediante `rsync -az --delete --exclude .git --exclude .env` sobre SSH nativo con el secreto `AWS_SSH_KEY` (sin requerir deploy keys en la VPS para el repositorio privado).
+3. Reconstruye e inicia los contenedores con `docker compose up -d --build --remove-orphans`.

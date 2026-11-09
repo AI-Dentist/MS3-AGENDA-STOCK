@@ -1,0 +1,59 @@
+name: dental-ms3
+
+services:
+  ms3-agenda:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: dental-ms3-agenda:prod
+    restart: unless-stopped
+    environment:
+      - APP_NAME=MS3-AGENDA-STOCK
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - APP_KEY=${APP_KEY}
+      - APP_URL=${APP_URL:-https://100-60-248-245.sslip.io}
+      - LOG_CHANNEL=stderr
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_REGION=us-east-1
+      - DYNAMODB_FALLBACK_MEMORY=false
+      - ML_SERVICE_URL=http://ml-service:8000
+      - KEYCLOAK_ISSUER_URI=${KEYCLOAK_ISSUER_URI:-https://20-83-242-208.sslip.io/realms/dental-platform}
+      - KEYCLOAK_BASE_URL=${KEYCLOAK_BASE_URL:-https://20-83-242-208.sslip.io}
+      - KEYCLOAK_REALM=${KEYCLOAK_REALM:-dental-platform}
+      - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-ms3-agenda-stock}
+      - KEYCLOAK_ALGORITHM=${KEYCLOAK_ALGORITHM:-RS256}
+      - KEYCLOAK_PUBLIC_KEY=${KEYCLOAK_PUBLIC_KEY:-}
+    command: ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8001"]
+    depends_on:
+      - ml-service
+    healthcheck:
+      test: ["CMD", "php", "-r", "exit(@file_get_contents('http://127.0.0.1:8001/health') ? 0 : 1);"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - dental-net
+
+  ml-service:
+    build:
+      context: ../../ml_service
+      dockerfile: Dockerfile
+    image: dental-ms3-ml-service:prod
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - dental-net
+
+networks:
+  dental-net:
+    external: true
