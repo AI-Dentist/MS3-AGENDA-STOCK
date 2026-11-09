@@ -14,6 +14,8 @@ services:
       - APP_KEY=${APP_KEY}
       - APP_URL=${APP_URL:-https://100-60-248-245.sslip.io}
       - LOG_CHANNEL=stderr
+      - SESSION_DRIVER=array
+      - CACHE_STORE=array
       - AWS_DEFAULT_REGION=us-east-1
       - AWS_REGION=us-east-1
       - DYNAMODB_FALLBACK_MEMORY=false
