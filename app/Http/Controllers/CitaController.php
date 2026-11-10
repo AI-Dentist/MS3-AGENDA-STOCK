@@ -9,6 +9,7 @@ use App\Application\UseCases\ReprogramarCitaUseCase;
 use App\Domain\Entities\Cita;
 use App\Domain\Exceptions\CitaCollisionException;
 use App\Domain\Repositories\CitaRepositoryInterface;
+use App\Domain\Services\CitaFeatureExtractor;
 use App\Domain\Services\MlInferenceServiceInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,13 +18,18 @@ use Throwable;
 
 class CitaController extends Controller
 {
+    private CitaFeatureExtractor $featureExtractor;
+
     public function __construct(
         private AgendarCitaUseCase $agendarCitaUseCase,
         private CancelarCitaUseCase $cancelarCitaUseCase,
         private ReprogramarCitaUseCase $reprogramarCitaUseCase,
         private CitaRepositoryInterface $citaRepository,
-        private MlInferenceServiceInterface $mlService
-    ) {}
+        private MlInferenceServiceInterface $mlService,
+        ?CitaFeatureExtractor $featureExtractor = null
+    ) {
+        $this->featureExtractor = $featureExtractor ?? new CitaFeatureExtractor();
+    }
 
     public function index(): JsonResponse
     {
@@ -32,34 +38,21 @@ class CitaController extends Controller
 
         $mlDisponible = false;
         $predictionsByCitaId = [];
+        $featuresImputadasByCitaId = [];
+
+        // Extraer features compartidas usando CitaFeatureExtractor (S6/S7)
+        $batchPayload = [];
+        foreach ($citas as $citaEntity) {
+            $extracted = $this->featureExtractor->extract($citaEntity, $citas);
+            $batchPayload[] = $extracted['payload'];
+            $featuresImputadasByCitaId[$citaEntity->id] = $extracted['featuresImputadas'];
+        }
 
         try {
             $health = $this->mlService->checkHealth();
             $mlDisponible = ($health['status'] ?? '') === 'UP';
 
-            if (! empty($citasArray)) {
-                $batchPayload = array_map(function ($c) {
-                    $fechaHora = $c['fecha_hora'] ?? '2027-01-01 10:00:00';
-                    try {
-                        $dt = new \DateTime($fechaHora);
-                    } catch (Throwable $e) {
-                        $dt = new \DateTime();
-                    }
-
-                    return [
-                        'cita_id' => (string) $c['id'],
-                        'paciente_id' => (string) ($c['paciente_id'] ?? 'pac-unknown'),
-                        'edad' => 35,
-                        'dias_anticipacion' => 7,
-                        'cancelaciones_previas' => 0,
-                        'dia_semana' => (int) $dt->format('N'),
-                        'hora_cita' => (int) $dt->format('G'),
-                        'tipo_tratamiento_riesgo' => 1,
-                        'duracion_minutos' => isset($c['duracion_estimada_min']) ? (int) $c['duracion_estimada_min'] : 30,
-                        'banda_horaria' => (int) $dt->format('G') >= 13 ? 1 : 0,
-                    ];
-                }, $citasArray);
-
+            if (! empty($batchPayload)) {
                 $batchResult = $this->mlService->predictNoShowBatch($batchPayload);
                 $mlDisponible = true;
                 foreach ($batchResult['predicciones'] ?? [] as $pred) {
@@ -73,20 +66,28 @@ class CitaController extends Controller
             $mlDisponible = false;
         }
 
-        $enrichedCitas = array_map(function ($cita) use ($mlDisponible, $predictionsByCitaId) {
+        $enrichedCitas = array_map(function ($cita) use ($mlDisponible, $predictionsByCitaId, $featuresImputadasByCitaId) {
+            $cid = $cita['id'];
+            $imputadas = $featuresImputadasByCitaId[$cid] ?? ['edad', 'anticipacionReserva'];
+
             if ($mlDisponible) {
-                $pred = $predictionsByCitaId[$cita['id']] ?? [];
+                $pred = $predictionsByCitaId[$cid] ?? [];
                 $prob = $pred['probabilidadNoShow'] ?? $pred['probabilidad_inasistencia'] ?? null;
                 $risk = $pred['nivelRiesgo'] ?? $pred['nivel_riesgo'] ?? null;
                 $accion = $pred['accionRecomendada'] ?? $pred['recomendacion_operativa'] ?? null;
+                $predImputadas = $pred['featuresImputadas'] ?? [];
 
                 $cita['probabilidadNoShow'] = $prob;
                 $cita['nivelRiesgo'] = $risk;
                 $cita['accionRecomendada'] = $accion;
+                $cita['featuresImputadas'] = array_values(array_unique(array_merge($imputadas, $predImputadas)));
+                $cita['datosEntrenamientoSinteticos'] = true;
             } else {
                 $cita['probabilidadNoShow'] = null;
                 $cita['nivelRiesgo'] = null;
                 $cita['accionRecomendada'] = null;
+                $cita['featuresImputadas'] = $imputadas;
+                $cita['datosEntrenamientoSinteticos'] = true;
             }
 
             return $cita;

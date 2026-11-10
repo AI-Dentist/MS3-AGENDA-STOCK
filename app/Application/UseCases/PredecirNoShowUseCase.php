@@ -4,117 +4,27 @@ namespace App\Application\UseCases;
 
 use App\Domain\Entities\Cita;
 use App\Domain\Repositories\CitaRepositoryInterface;
+use App\Domain\Services\CitaFeatureExtractor;
 use App\Domain\Services\MlInferenceServiceInterface;
-use DateTime;
-use Throwable;
 
 class PredecirNoShowUseCase
 {
+    private CitaFeatureExtractor $featureExtractor;
+
     public function __construct(
         private MlInferenceServiceInterface $mlService,
-        private ?CitaRepositoryInterface $citaRepository = null
-    ) {}
+        private ?CitaRepositoryInterface $citaRepository = null,
+        ?CitaFeatureExtractor $featureExtractor = null
+    ) {
+        $this->featureExtractor = $featureExtractor ?? new CitaFeatureExtractor();
+    }
 
     public function execute(array $data): array
     {
-        $imputadas = [];
-
-        // 1. Hora y día de semana (derivables de fecha_hora si viene dada)
-        if (isset($data['fecha_hora'])) {
-            try {
-                $dt = new DateTime($data['fecha_hora']);
-                $diaSemana = (int) $dt->format('N');
-                $horaCita = (int) $dt->format('G');
-            } catch (Throwable $e) {
-                $diaSemana = 1;
-                $horaCita = 10;
-            }
-        } else {
-            $diaSemana = isset($data['dia_semana']) ? (int) $data['dia_semana'] : 1;
-            $horaCita = isset($data['hora_cita']) ? (int) $data['hora_cita'] : 10;
-        }
-
-        // 2. Banda horaria (0 = Mañana < 13:00, 1 = Tarde >= 13:00)
-        $bandaHoraria = isset($data['banda_horaria']) ? (int) $data['banda_horaria'] : ($horaCita >= 13 ? 1 : 0);
-
-        // 3. Duración estimada
-        if (isset($data['duracion_minutos'])) {
-            $duracion = (int) $data['duracion_minutos'];
-        } elseif (isset($data['duracion_estimada_min'])) {
-            $duracion = (int) $data['duracion_estimada_min'];
-        } else {
-            $duracion = 30;
-            $imputadas[] = 'duracion_minutos (default: 30)';
-        }
-
-        // 4. Días de anticipación
-        if (isset($data['dias_anticipacion'])) {
-            $diasAnticipacion = (int) $data['dias_anticipacion'];
-        } elseif (isset($data['reservada_en'], $data['fecha_hora'])) {
-            try {
-                $f1 = new DateTime($data['reservada_en']);
-                $f2 = new DateTime($data['fecha_hora']);
-                $diasAnticipacion = max(0, (int) $f1->diff($f2)->days);
-            } catch (Throwable $e) {
-                $diasAnticipacion = 7;
-                $imputadas[] = 'dias_anticipacion (default: 7)';
-            }
-        } else {
-            $diasAnticipacion = 7;
-            $imputadas[] = 'dias_anticipacion (default: 7)';
-        }
-
-        // 5. Cancelaciones previas del paciente
-        if (isset($data['cancelaciones_previas'])) {
-            $cancelacionesPrevias = (int) $data['cancelaciones_previas'];
-        } elseif (isset($data['paciente_id']) && $this->citaRepository !== null) {
-            $allCitas = $this->citaRepository->findAll();
-            $cancelacionesPrevias = 0;
-            foreach ($allCitas as $cp) {
-                if ($cp->pacienteId === $data['paciente_id'] && ($cp->estado === Cita::ESTADO_CANCELADA || $cp->estado === Cita::ESTADO_NO_ASISTIO)) {
-                    $cancelacionesPrevias++;
-                }
-            }
-        } else {
-            $cancelacionesPrevias = 0;
-            $imputadas[] = 'cancelaciones_previas (default: 0)';
-        }
-
-        // 6. Edad
-        if (isset($data['edad'])) {
-            $edad = (int) $data['edad'];
-        } else {
-            $edad = 35;
-            $imputadas[] = 'edad (default: 35)';
-        }
-
-        // 7. Tipo de tratamiento / riesgo
-        if (isset($data['tipo_tratamiento_riesgo'])) {
-            $riesgoTratamiento = (int) $data['tipo_tratamiento_riesgo'];
-        } elseif (isset($data['tipo_tratamiento'])) {
-            $tipoUpper = strtoupper((string) $data['tipo_tratamiento']);
-            if (in_array($tipoUpper, ['CIRUGIA', 'ENDODONCIA', 'IMPLANTE'], true)) {
-                $riesgoTratamiento = 2;
-            } elseif (in_array($tipoUpper, ['ORTODONCIA', 'RESTAURACION', 'PROFILAXIS'], true)) {
-                $riesgoTratamiento = 1;
-            } else {
-                $riesgoTratamiento = 0;
-            }
-        } else {
-            $riesgoTratamiento = 1;
-            $imputadas[] = 'tipo_tratamiento_riesgo (default: 1)';
-        }
-
-        $payload = [
-            'edad' => $edad,
-            'dias_anticipacion' => $diasAnticipacion,
-            'cancelaciones_previas' => $cancelacionesPrevias,
-            'dia_semana' => $diaSemana,
-            'hora_cita' => $horaCita,
-            'banda_horaria' => $bandaHoraria,
-            'duracion_minutos' => $duracion,
-            'tipo_tratamiento_riesgo' => $riesgoTratamiento,
-        ];
+        $allCitas = ($this->citaRepository !== null) ? $this->citaRepository->findAll() : null;
+        $extracted = $this->featureExtractor->extract($data, $allCitas);
+        $payload = $extracted['payload'];
+        $imputadas = $extracted['featuresImputadas'];
 
         $rawResult = $this->mlService->predictNoShow($payload);
 
@@ -149,11 +59,12 @@ class PredecirNoShowUseCase
             'nivelRiesgo' => $nivelRiesgo,
             'accionRecomendada' => $accionRecomendada,
             'featuresImputadas' => $mergedImputadas,
+            'datosEntrenamientoSinteticos' => true,
+            'datosSinteticos' => true,
             // Aliases de compatibilidad heredada
             'probabilidad_inasistencia' => $prob,
             'nivel_riesgo' => $nivelRiesgo,
             'recomendacion_operativa' => $accionRecomendada,
-            'datosSinteticos' => true,
         ]);
     }
 }
