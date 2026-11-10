@@ -148,7 +148,8 @@ El microservicio utiliza **Amazon DynamoDB** como motor de almacenamiento NoSQL 
 ### Machine Learning
 - `GET /api/agendamiento/ml/health`: Estado del motor de inferencia y modelos cargados en memoria.
 - `POST /api/agendamiento/ml/predict-noshow`: Estimar probabilidad de inasistencia de una cita (S10). Alias retrocompatible: `POST /api/agendamiento/ml/predict-no-show`. Ante caída del sidecar responde **503 `ML_SERVICE_UNAVAILABLE`**.
-- `GET /api/agendamiento/ml/clusters`: Obtener centroides, distribución y asignaciones de clústeres para pacientes e inventario desde DynamoDB (S11). Ante caída del sidecar responde **503 `ML_SERVICE_UNAVAILABLE`**.
+- `GET /api/agendamiento/ml/clusters`: Obtener centroides, distribución y asignaciones de clústeres para pacientes e inventario desde DynamoDB (S11), enriquecido con gasto real en efectivo desde MS1 ERP vía GraphQL (S2). Transparencia de imputación y estimación (ver [`docs/ms1-spending-integration.md`](docs/ms1-spending-integration.md)). Ante caída del sidecar responde **503 `ML_SERVICE_UNAVAILABLE`**.
+- `GET /api/agendamiento/ml/model-card`: Consultar ficha técnica del modelo con métricas de evaluación offline (accuracy, precision, recall, F1, ROC-AUC para No-Show; Silhouette score para clustering de pacientes e inventario) y metadato `datosSinteticos: true` (S9). Alias: `/model_card`.
 - `POST /api/agendamiento/ml/cluster-paciente`: Segmentación de comportamiento de paciente.
 - `POST /api/agendamiento/ml/cluster-stock`: Clasificación ABC de criticidad de insumos.
 

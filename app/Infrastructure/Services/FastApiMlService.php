@@ -2,6 +2,8 @@
 
 namespace App\Infrastructure\Services;
 
+use App\Application\DTOs\PatientSpendingResult;
+use App\Application\Ports\Ms1BillingPort;
 use App\Domain\Entities\Cita;
 use App\Domain\Repositories\CitaRepositoryInterface;
 use App\Domain\Repositories\InsumoRepositoryInterface;
@@ -19,7 +21,8 @@ class FastApiMlService implements MlInferenceServiceInterface
     public function __construct(
         private ?CitaRepositoryInterface $citaRepository = null,
         private ?InsumoRepositoryInterface $insumoRepository = null,
-        private ?MovimientoStockRepositoryInterface $movimientoStockRepository = null
+        private ?MovimientoStockRepositoryInterface $movimientoStockRepository = null,
+        private ?Ms1BillingPort $ms1BillingClient = null
     ) {
         $this->baseUrl = rtrim(env('ML_SERVICE_URL', 'http://127.0.0.1:8005'), '/');
     }
@@ -114,10 +117,10 @@ class FastApiMlService implements MlInferenceServiceInterface
         }
     }
 
-    public function getClusters(): array
+    public function getClusters(?string $callerBearerToken = null): array
     {
         try {
-            // 1. Recolectar métricas de pacientes desde el repositorio de citas (S8)
+            // 1. Recolectar métricas de pacientes desde el repositorio de citas (S8) y gasto MS1 (S2)
             $pacientesData = [];
             if ($this->citaRepository !== null) {
                 $citas = $this->citaRepository->findAll();
@@ -143,7 +146,8 @@ class FastApiMlService implements MlInferenceServiceInterface
 
                     $tasa = $total > 0 ? round($asistidas / $total, 2) : 1.0;
                     $imputadas = [];
-                    $estimadas = ['gasto_total_estimado']; // S8: gasto siempre como estimado
+                    // gasto_total_estimado se preserva siempre como estimado si se conserva dicho campo
+                    $estimadas = ['gasto_total_estimado'];
 
                     if (count($fechas) >= 2) {
                         usort($fechas, fn ($a, $b) => $a->getTimestamp() <=> $b->getTimestamp());
@@ -157,12 +161,21 @@ class FastApiMlService implements MlInferenceServiceInterface
                         $imputadas[] = 'dias_promedio_entre_citas';
                     }
 
+                    $gastoEstimado = (float) ($total * 60.0);
+                    $spending = $this->ms1BillingClient !== null
+                        ? $this->ms1BillingClient->getPatientSpending((string) $pid, $gastoEstimado, $callerBearerToken)
+                        : PatientSpendingResult::fallback((string) $pid, $gastoEstimado);
+
                     $pacientesData[] = [
                         'paciente_id' => (string) $pid,
                         'total_citas' => (int) $total,
                         'tasa_asistencia' => (float) $tasa,
                         'dias_promedio_entre_citas' => (float) $diasPromedio,
-                        'gasto_total_estimado' => (float) ($total * 60.0),
+                        'gasto_total_estimado' => $gastoEstimado,
+                        'gasto_total_real' => $spending->gastoTotalReal,
+                        'gasto_moneda' => $spending->gastoMoneda,
+                        'gasto_origen' => $spending->gastoOrigen,
+                        'gasto_real_observado' => $spending->gastoRealObservado,
                         'featuresImputadas' => $imputadas,
                         'featuresEstimadas' => $estimadas,
                     ];

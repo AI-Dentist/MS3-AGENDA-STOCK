@@ -361,3 +361,77 @@ def test_model_card_endpoint(client):
     assert data["datosEntrenamientoSinteticos"] is True
     assert "accuracy" in data["modelos"]["no_show_prediction"]["metricas"]
     assert "silhouette_score" in data["modelos"]["patient_clustering"]["metricas"]
+
+
+def test_batch_cluster_real_patient_spending_additive(client):
+    payload = {
+        "pacientes": [
+            {
+                "paciente_id": "pac-real-001",
+                "total_citas": 8,
+                "tasa_asistencia": 0.88,
+                "dias_promedio_entre_citas": 22.5,
+                "gasto_total_estimado": 480.0,
+                "gasto_total_real": 350.0,
+                "gasto_moneda": "BOB",
+                "gasto_origen": "real_ms1_pagado",
+                "gasto_real_observado": True,
+                "featuresImputadas": [],
+                "featuresEstimadas": [],
+            }
+        ],
+        "insumos": [STOCK_ALTA],
+    }
+    res = client.post("/batch-cluster", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    asig = data["pacientes"]["asignaciones"][0]
+    assert asig["paciente_id"] == "pac-real-001"
+    assert asig["gasto_total_real"] == 350.0
+    assert asig["gasto_total_estimado"] == 480.0
+    assert asig["gasto_moneda"] == "BOB"
+    assert asig["gasto_origen"] == "real_ms1_pagado"
+    assert asig["gasto_real_observado"] is True
+    assert asig["features"]["gasto_total_real"] == 350.0
+    assert asig["features"]["gasto_total_estimado"] == 480.0
+    assert asig["features"]["gasto_moneda"] == "BOB"
+    assert asig["features"]["gasto_origen"] == "real_ms1_pagado"
+    # gasto_total_estimado must be preserved in featuresEstimadas as long as it is returned
+    assert "gasto_total_estimado" in asig["featuresEstimadas"]
+
+
+def test_batch_patient_item_consistency_validation(client):
+    # 1. observed=True but amount is None
+    res = client.post("/batch-cluster", json={
+        "pacientes": [{
+            "paciente_id": "p-inv-1", "total_citas": 2, "tasa_asistencia": 1.0,
+            "dias_promedio_entre_citas": 10.0, "gasto_total_estimado": 120.0,
+            "gasto_real_observado": True, "gasto_total_real": None, "gasto_origen": "real_ms1_pagado"
+        }],
+        "insumos": [STOCK_ALTA]
+    })
+    assert res.status_code == 422
+
+    # 2. observed=True but source indicates estimate
+    res2 = client.post("/batch-cluster", json={
+        "pacientes": [{
+            "paciente_id": "p-inv-2", "total_citas": 2, "tasa_asistencia": 1.0,
+            "dias_promedio_entre_citas": 10.0, "gasto_total_estimado": 120.0,
+            "gasto_real_observado": True, "gasto_total_real": 150.0, "gasto_origen": "estimado"
+        }],
+        "insumos": [STOCK_ALTA]
+    })
+    assert res2.status_code == 422
+
+    # 3. observed=False but real amount is provided
+    res3 = client.post("/batch-cluster", json={
+        "pacientes": [{
+            "paciente_id": "p-inv-3", "total_citas": 2, "tasa_asistencia": 1.0,
+            "dias_promedio_entre_citas": 10.0, "gasto_total_estimado": 120.0,
+            "gasto_real_observado": False, "gasto_total_real": 150.0, "gasto_origen": "estimado"
+        }],
+        "insumos": [STOCK_ALTA]
+    })
+    assert res3.status_code == 422
+
+

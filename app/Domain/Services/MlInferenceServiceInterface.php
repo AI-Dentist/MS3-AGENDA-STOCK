@@ -39,9 +39,10 @@ interface MlInferenceServiceInterface
     /**
      * Obtiene los clusters completos (pacientes e insumos) con centroides, distribución y asignaciones.
      *
+     * @param string|null $callerBearerToken Token Bearer del usuario autenticado para consultar MS1 si aplica
      * @return array
      */
-    public function getClusters(): array;
+    public function getClusters(?string $callerBearerToken = null): array;
 
     /**
      * Verifica el estado del micro-servicio de Machine Learning.

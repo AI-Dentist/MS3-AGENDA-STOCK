@@ -18,7 +18,7 @@ import joblib
 import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 
@@ -214,6 +214,22 @@ class BatchPatientItem(BaseModel):
     gasto_total_estimado: float = Field(..., ge=0.0)
     featuresImputadas: List[str] = Field(default_factory=list)
     featuresEstimadas: List[str] = Field(default_factory=lambda: ["gasto_total_estimado"])
+    gasto_total_real: Optional[float] = None
+    gasto_moneda: str = "BOB"
+    gasto_origen: str = "estimado"
+    gasto_real_observado: bool = False
+
+    @model_validator(mode="after")
+    def validate_spending_consistency(self) -> "BatchPatientItem":
+        if self.gasto_real_observado:
+            if self.gasto_total_real is None or not np.isfinite(self.gasto_total_real) or self.gasto_total_real < 0:
+                raise ValueError("gasto_real_observado=True requires a finite non-negative gasto_total_real")
+            if self.gasto_origen in ("estimado", "estimado_fallback"):
+                raise ValueError(f"gasto_real_observado=True cannot have estimated source: {self.gasto_origen}")
+        else:
+            if self.gasto_total_real is not None:
+                raise ValueError("gasto_real_observado=False requires gasto_total_real to be None")
+        return self
 
 
 class BatchStockItem(BaseModel):
@@ -240,8 +256,15 @@ class PatientAssignment(BaseModel):
     paciente_id: str
     cluster: str
     cluster_id: int
+    features: Optional[Dict[str, Any]] = None
     featuresImputadas: List[str] = Field(default_factory=list)
     featuresEstimadas: List[str] = Field(default_factory=lambda: ["gasto_total_estimado"])
+    datosEntrenamientoSinteticos: bool = True
+    gasto_total_real: Optional[float] = None
+    gasto_total_estimado: Optional[float] = None
+    gasto_moneda: str = "BOB"
+    gasto_origen: str = "estimado"
+    gasto_real_observado: bool = False
 
 
 class StockAssignment(BaseModel):
@@ -329,20 +352,42 @@ def _predict_no_show_single(
 
 
 def _cluster_patient_single(item: BatchPatientItem) -> PatientAssignment:
+    spending_feature = item.gasto_total_real if (item.gasto_real_observado and item.gasto_total_real is not None) else item.gasto_total_estimado
     df = pd.DataFrame([{
         "total_citas": item.total_citas,
         "tasa_asistencia": item.tasa_asistencia,
         "dias_promedio_entre_citas": item.dias_promedio_entre_citas,
-        "gasto_total_estimado": item.gasto_total_estimado,
+        "gasto_total_estimado": spending_feature,
     }])
     cluster_id = int(models["patient_clustering"].predict(df)[0])
     name = PATIENT_CLUSTER_NAMES[cluster_id % len(PATIENT_CLUSTER_NAMES)]
+    features_dict = {
+        "total_citas": item.total_citas,
+        "tasa_asistencia": item.tasa_asistencia,
+        "dias_promedio_entre_citas": item.dias_promedio_entre_citas,
+        "gasto_total_estimado": item.gasto_total_estimado,
+        "gasto_total_real": item.gasto_total_real,
+        "gasto_moneda": item.gasto_moneda,
+        "gasto_origen": item.gasto_origen,
+        "gasto_real_observado": item.gasto_real_observado,
+    }
+    estimadas = list(item.featuresEstimadas)
+    if item.gasto_total_estimado is not None and "gasto_total_estimado" not in estimadas:
+        estimadas.append("gasto_total_estimado")
+
     return PatientAssignment(
         paciente_id=item.paciente_id,
         cluster=name,
         cluster_id=cluster_id,
+        features=features_dict,
         featuresImputadas=item.featuresImputadas,
-        featuresEstimadas=item.featuresEstimadas,
+        featuresEstimadas=estimadas,
+        datosEntrenamientoSinteticos=True,
+        gasto_total_real=item.gasto_total_real,
+        gasto_total_estimado=item.gasto_total_estimado,
+        gasto_moneda=item.gasto_moneda,
+        gasto_origen=item.gasto_origen,
+        gasto_real_observado=item.gasto_real_observado,
     )
 
 

@@ -75,10 +75,11 @@ class MachineLearningController extends Controller
         }
     }
 
-    public function clusters(): JsonResponse
+    public function clusters(Request $request): JsonResponse
     {
         try {
-            $clusters = $this->mlService->getClusters();
+            $callerBearerToken = $request->bearerToken();
+            $clusters = $this->mlService->getClusters($callerBearerToken);
 
             return response()->json([
                 'success' => true,
