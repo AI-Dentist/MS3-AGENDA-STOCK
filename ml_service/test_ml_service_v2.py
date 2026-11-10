@@ -435,3 +435,94 @@ def test_batch_patient_item_consistency_validation(client):
     assert res3.status_code == 422
 
 
+def test_batch_cluster_rejects_observed_usd(client):
+    res = client.post("/batch-cluster", json={
+        "pacientes": [{
+            "paciente_id": "p-usd", "total_citas": 2, "tasa_asistencia": 1.0,
+            "dias_promedio_entre_citas": 10.0, "gasto_total_estimado": 120.0,
+            "gasto_real_observado": True, "gasto_total_real": 240.5, "gasto_origen": "real_ms1_pagado",
+            "gasto_moneda": "USD"
+        }],
+        "insumos": [STOCK_ALTA]
+    })
+    assert res.status_code == 422
+
+
+def test_batch_cluster_rejects_observed_unknown_source(client):
+    res = client.post("/batch-cluster", json={
+        "pacientes": [{
+            "paciente_id": "p-unknown-src", "total_citas": 2, "tasa_asistencia": 1.0,
+            "dias_promedio_entre_citas": 10.0, "gasto_total_estimado": 120.0,
+            "gasto_real_observado": True, "gasto_total_real": 240.5, "gasto_origen": "unknown_gateway",
+            "gasto_moneda": "BOB"
+        }],
+        "insumos": [STOCK_ALTA]
+    })
+    assert res.status_code == 422
+
+
+def test_batch_cluster_rejects_real_source_with_observed_false(client):
+    res = client.post("/batch-cluster", json={
+        "pacientes": [{
+            "paciente_id": "p-fake-real", "total_citas": 2, "tasa_asistencia": 1.0,
+            "dias_promedio_entre_citas": 10.0, "gasto_total_estimado": 120.0,
+            "gasto_real_observado": False, "gasto_total_real": None, "gasto_origen": "real_ms1_pagado",
+            "gasto_moneda": "BOB"
+        }],
+        "insumos": [STOCK_ALTA]
+    })
+    assert res.status_code == 422
+
+
+def test_batch_cluster_preserves_legacy_omitted_metadata_defaults(client):
+    res = client.post("/batch-cluster", json={
+        "pacientes": [{
+            "paciente_id": "p-legacy", "total_citas": 2, "tasa_asistencia": 1.0,
+            "dias_promedio_entre_citas": 10.0, "gasto_total_estimado": 120.0
+        }],
+        "insumos": [STOCK_ALTA]
+    })
+    assert res.status_code == 200
+    p = res.json()["pacientes"]["asignaciones"][0]
+    assert p["gasto_origen"] == "estimado"
+    assert p["gasto_real_observado"] is False
+    assert p["gasto_total_real"] is None
+    assert p["gasto_moneda"] == "BOB"
+    assert "gasto_total_estimado" in p["featuresEstimadas"]
+
+
+def test_batch_cluster_preserves_estimado_fallback(client):
+    res = client.post("/batch-cluster", json={
+        "pacientes": [{
+            "paciente_id": "p-fallback", "total_citas": 2, "tasa_asistencia": 1.0,
+            "dias_promedio_entre_citas": 10.0, "gasto_total_estimado": 120.0,
+            "gasto_real_observado": False, "gasto_total_real": None, "gasto_origen": "estimado_fallback",
+            "gasto_moneda": "BOB"
+        }],
+        "insumos": [STOCK_ALTA]
+    })
+    assert res.status_code == 200
+    p = res.json()["pacientes"]["asignaciones"][0]
+    assert p["gasto_origen"] == "estimado_fallback"
+    assert p["gasto_real_observado"] is False
+    assert p["gasto_total_real"] is None
+
+
+def test_batch_cluster_preserves_observed_zero(client):
+    res = client.post("/batch-cluster", json={
+        "pacientes": [{
+            "paciente_id": "p-zero", "total_citas": 2, "tasa_asistencia": 1.0,
+            "dias_promedio_entre_citas": 10.0, "gasto_total_estimado": 120.0,
+            "gasto_real_observado": True, "gasto_total_real": 0.0, "gasto_origen": "real_ms1_pagado",
+            "gasto_moneda": "BOB"
+        }],
+        "insumos": [STOCK_ALTA]
+    })
+    assert res.status_code == 200
+    p = res.json()["pacientes"]["asignaciones"][0]
+    assert p["gasto_origen"] == "real_ms1_pagado"
+    assert p["gasto_real_observado"] is True
+    assert p["gasto_total_real"] == 0.0
+
+
+

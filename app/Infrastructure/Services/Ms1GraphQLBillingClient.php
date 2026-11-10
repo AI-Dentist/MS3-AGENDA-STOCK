@@ -62,8 +62,10 @@ GRAPHQL;
             return PatientSpendingResult::fallback($pacienteId, $fallbackEstimado);
         }
 
-        if (isset($body['errors']) && ! empty($body['errors'])) {
-            return PatientSpendingResult::fallback($pacienteId, $fallbackEstimado);
+        if (array_key_exists('errors', $body)) {
+            if (! is_array($body['errors']) || ! empty($body['errors'])) {
+                return PatientSpendingResult::fallback($pacienteId, $fallbackEstimado);
+            }
         }
 
         if (! isset($body['data']['obtenerGastoPagadoPaciente']) || ! is_array($body['data']['obtenerGastoPagadoPaciente'])) {

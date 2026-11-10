@@ -364,4 +364,80 @@ class Ms1GraphQLBillingClientTest extends TestCase
         $this->assertFalse($result->gastoRealObservado);
         $this->assertNull($result->gastoTotalReal);
     }
+
+    public function test_malformed_errors_member_boolean_false_falls_back_to_estimated(): void
+    {
+        Http::fake([
+            'http://127.0.0.1:8081/graphql' => Http::response([
+                'errors' => false,
+                'data' => [
+                    'obtenerGastoPagadoPaciente' => [
+                        'pacienteId' => $this->validUuid,
+                        'moneda' => 'BOB',
+                        'completo' => true,
+                        'totalPagadoBs' => 240.50,
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $result = $this->client->getPatientSpending($this->validUuid, 180.0, 'valid-token');
+
+        $this->assertTrue($result->esEstimado);
+        $this->assertFalse($result->gastoRealObservado);
+        $this->assertSame('estimado_fallback', $result->gastoOrigen);
+        $this->assertNull($result->gastoTotalReal);
+        $this->assertEquals(180.0, $result->gastoTotalEstimado);
+    }
+
+    public function test_valid_empty_errors_array_allows_real_total(): void
+    {
+        Http::fake([
+            'http://127.0.0.1:8081/graphql' => Http::response([
+                'errors' => [],
+                'data' => [
+                    'obtenerGastoPagadoPaciente' => [
+                        'pacienteId' => $this->validUuid,
+                        'moneda' => 'BOB',
+                        'completo' => true,
+                        'totalPagadoBs' => 240.50,
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $result = $this->client->getPatientSpending($this->validUuid, 180.0, 'valid-token');
+
+        $this->assertFalse($result->esEstimado);
+        $this->assertTrue($result->gastoRealObservado);
+        $this->assertSame('real_ms1_pagado', $result->gastoOrigen);
+        $this->assertEquals(240.50, $result->gastoTotalReal);
+    }
+
+    public function test_query_and_separate_callers_never_share_authorization_or_results(): void
+    {
+        config(['services.ms1.graphql_url' => 'http://billing.invalid/graphql']);
+        Http::fakeSequence()
+            ->push(['data' => ['obtenerGastoPagadoPaciente' => [
+                'pacienteId' => $this->validUuid,
+                'moneda' => 'BOB',
+                'completo' => true,
+                'totalPagadoBs' => 240.5,
+            ]]], 200)
+            ->push(['errors' => [['message' => 'private-canary']]], 403);
+
+        $client = new Ms1GraphQLBillingClient();
+        $this->assertSame(240.5, $client->getPatientSpending($this->validUuid, 180, 'caller-A')->gastoTotalReal);
+        $this->assertNull($client->getPatientSpending($this->validUuid, 180, 'caller-B')->gastoTotalReal);
+
+        $sent = Http::recorded();
+        $this->assertCount(2, $sent);
+        foreach (['caller-A', 'caller-B'] as $i => $token) {
+            $request = $sent[$i][0];
+            $this->assertSame('http://billing.invalid/graphql', $request->url());
+            $this->assertSame(['Bearer '.$token], $request->header('Authorization'));
+            $this->assertSame(['pacienteId' => $this->validUuid], $request['variables']);
+            $this->assertStringNotContainsString($token, $request->body());
+        }
+    }
 }

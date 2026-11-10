@@ -221,14 +221,23 @@ class BatchPatientItem(BaseModel):
 
     @model_validator(mode="after")
     def validate_spending_consistency(self) -> "BatchPatientItem":
+        if self.gasto_moneda != "BOB":
+            raise ValueError(f"Invalid currency: {self.gasto_moneda}. Only 'BOB' is supported.")
+
         if self.gasto_real_observado:
+            if self.gasto_origen != "real_ms1_pagado":
+                raise ValueError(
+                    f"gasto_real_observado=True requires gasto_origen='real_ms1_pagado', got '{self.gasto_origen}'"
+                )
             if self.gasto_total_real is None or not np.isfinite(self.gasto_total_real) or self.gasto_total_real < 0:
                 raise ValueError("gasto_real_observado=True requires a finite non-negative gasto_total_real")
-            if self.gasto_origen in ("estimado", "estimado_fallback"):
-                raise ValueError(f"gasto_real_observado=True cannot have estimated source: {self.gasto_origen}")
         else:
             if self.gasto_total_real is not None:
                 raise ValueError("gasto_real_observado=False requires gasto_total_real to be None")
+            if self.gasto_origen not in ("estimado", "estimado_fallback"):
+                raise ValueError(
+                    f"gasto_real_observado=False requires gasto_origen in ('estimado', 'estimado_fallback'), got '{self.gasto_origen}'"
+                )
         return self
 
 
