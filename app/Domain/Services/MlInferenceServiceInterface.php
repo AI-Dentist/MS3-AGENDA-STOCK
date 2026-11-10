@@ -49,4 +49,11 @@ interface MlInferenceServiceInterface
      * @return array
      */
     public function checkHealth(): array;
+
+    /**
+     * Obtiene el Model Card con métricas de evaluación offline y metadata de modelos (S9).
+     *
+     * @return array
+     */
+    public function getModelCard(): array;
 }

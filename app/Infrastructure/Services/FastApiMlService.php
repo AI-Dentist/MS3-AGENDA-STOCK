@@ -289,4 +289,20 @@ class FastApiMlService implements MlInferenceServiceInterface
             'error' => 'No se pudo conectar con el servicio FastAPI en '.$this->baseUrl,
         ];
     }
+
+    public function getModelCard(): array
+    {
+        try {
+            $response = Http::timeout(4)->get("{$this->baseUrl}/model-card");
+            if ($response->failed()) {
+                throw new MlSidecarUnavailableException('Error al obtener model card: '.$response->body());
+            }
+
+            return $response->json();
+        } catch (MlSidecarUnavailableException $e) {
+            throw $e;
+        } catch (Throwable $e) {
+            throw new MlSidecarUnavailableException('No se pudo conectar con el servicio FastAPI de model card: '.$e->getMessage(), 0, $e);
+        }
+    }
 }

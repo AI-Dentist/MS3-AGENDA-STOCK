@@ -347,3 +347,17 @@ def test_batch_cluster_metadata(client):
     assert "modeloVersion" in data
     assert data["datosSinteticos"] is True
     assert data["datosEntrenamientoSinteticos"] is True
+
+
+def test_model_card_endpoint(client):
+    res = client.get("/model-card")
+    assert res.status_code == 200
+    data = res.json()
+    assert "modelos" in data
+    assert "no_show_prediction" in data["modelos"]
+    assert "patient_clustering" in data["modelos"]
+    assert "stock_clustering" in data["modelos"]
+    assert data["datosSinteticos"] is True
+    assert data["datosEntrenamientoSinteticos"] is True
+    assert "accuracy" in data["modelos"]["no_show_prediction"]["metricas"]
+    assert "silhouette_score" in data["modelos"]["patient_clustering"]["metricas"]

@@ -48,6 +48,8 @@ Route::prefix('api/agendamiento')->middleware('auth.keycloak')->group(function (
         Route::post('/predict-noshow', [MachineLearningController::class, 'predictNoShow']);
         Route::post('/predict-no-show', [MachineLearningController::class, 'predictNoShow']);
         Route::get('/clusters', [MachineLearningController::class, 'clusters']);
+        Route::get('/model-card', [MachineLearningController::class, 'modelCard']);
+        Route::get('/model_card', [MachineLearningController::class, 'modelCard']);
         Route::post('/cluster-paciente', [MachineLearningController::class, 'clusterPatient']);
         Route::post('/cluster-stock', [MachineLearningController::class, 'clusterStock']);
     });

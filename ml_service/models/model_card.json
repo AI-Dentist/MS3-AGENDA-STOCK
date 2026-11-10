@@ -1,0 +1,72 @@
+{
+  "version": "1.0.0",
+  "datosSinteticos": true,
+  "datosEntrenamientoSinteticos": true,
+  "evaluadoEn": "2026-11-10T02:15:52.530298+00:00",
+  "descripcion": "Model Card de evaluación offline para microservicio MS3 (No-Show y Clustering).",
+  "modelos": {
+    "no_show_prediction": {
+      "tipo": "RandomForestClassifier",
+      "pipeline": "StandardScaler + RandomForestClassifier(n_estimators=150, max_depth=7)",
+      "muestras_totales": 2000,
+      "muestras_evaluacion": 400,
+      "split_test": 0.2,
+      "metricas": {
+        "accuracy": 0.69,
+        "precision": 0.6012,
+        "recall": 0.6242,
+        "f1_score": 0.6125,
+        "roc_auc": 0.7389
+      },
+      "features": [
+        "cancelaciones_previas",
+        "dias_anticipacion",
+        "dia_semana",
+        "hora_cita",
+        "banda_horaria",
+        "duracion_minutos",
+        "tipo_tratamiento_riesgo",
+        "edad"
+      ]
+    },
+    "patient_clustering": {
+      "tipo": "KMeans",
+      "pipeline": "StandardScaler + KMeans(n_clusters=3)",
+      "muestras_totales": 800,
+      "k": 3,
+      "clusters": [
+        "Frecuente y Puntual",
+        "Riesgo de Abandono / Inconstante",
+        "Atención Esporádica / Urgencias"
+      ],
+      "metricas": {
+        "silhouette_score": 0.5027
+      },
+      "features": [
+        "total_citas",
+        "tasa_asistencia",
+        "dias_promedio_entre_citas",
+        "gasto_total_estimado"
+      ]
+    },
+    "stock_clustering": {
+      "tipo": "KMeans",
+      "pipeline": "StandardScaler + KMeans(n_clusters=3)",
+      "muestras_totales": 350,
+      "k": 3,
+      "clusters": [
+        "Alta Rotación Crítica",
+        "Consumo Estándar",
+        "Baja Rotación"
+      ],
+      "metricas": {
+        "silhouette_score": 0.3177
+      },
+      "features": [
+        "consumo_mensual",
+        "costo_unitario",
+        "dias_reabastecimiento"
+      ]
+    }
+  }
+}

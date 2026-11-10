@@ -10,6 +10,7 @@ NOTE: All models are trained on DATOS SINTÉTICOS (synthetic data). This is stat
 explicitly in every response metadata field. This is a portfolio/non-commercial project.
 """
 
+import json
 import os
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional
@@ -526,3 +527,15 @@ def batch_cluster(payload: BatchClusterRequest):
             asignaciones=ins_asignaciones,
         ),
     )
+
+
+@app.get("/model-card")
+@app.get("/model_card")
+def get_model_card():
+    card_path = os.path.join(MODELS_DIR, "model_card.json")
+    if not os.path.exists(card_path):
+        from evaluate_models import generate_model_card
+        return generate_model_card()
+
+    with open(card_path, "r", encoding="utf-8") as f:
+        return json.load(f)

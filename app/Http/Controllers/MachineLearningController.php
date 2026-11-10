@@ -171,4 +171,31 @@ class MachineLearningController extends Controller
             ], 500);
         }
     }
+
+    public function modelCard(): JsonResponse
+    {
+        try {
+            $card = $this->mlService->getModelCard();
+
+            return response()->json([
+                'success' => true,
+                'data' => $card,
+                'timestamp' => now()->toIso8601String(),
+            ], 200);
+        } catch (MlSidecarUnavailableException $e) {
+            return response()->json([
+                'success' => false,
+                'code' => 'ML_SERVICE_UNAVAILABLE',
+                'error' => 'El micro-sidecar de Machine Learning no está disponible: '.$e->getMessage(),
+                'timestamp' => now()->toIso8601String(),
+            ], 503);
+        } catch (Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'code' => 'ML_MODEL_CARD_ERROR',
+                'error' => 'Error al obtener model card: '.$e->getMessage(),
+                'timestamp' => now()->toIso8601String(),
+            ], 500);
+        }
+    }
 }
