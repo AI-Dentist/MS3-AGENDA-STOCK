@@ -34,6 +34,16 @@ class ReporteController extends Controller
         $desde = $request->query('desde');
         $hasta = $request->query('hasta');
 
+        // Rechazar tipos no escalares (ej. arrays ?desde[]=x) con 422
+        if (($request->has('desde') && ! is_string($desde)) || ($request->has('hasta') && ! is_string($hasta))) {
+            return response()->json([
+                'success' => false,
+                'code' => 'INVALID_PERIOD',
+                'error' => "Los parámetros 'desde' y 'hasta' deben ser cadenas de texto con formato YYYY-MM-DD.",
+                'timestamp' => now()->toIso8601String(),
+            ], 422);
+        }
+
         $hasDesde = $desde !== null && trim($desde) !== '';
         $hasHasta = $hasta !== null && trim($hasta) !== '';
 
@@ -92,10 +102,11 @@ class ReporteController extends Controller
             }
         }
 
-        // 3. Validación de filtro 'estado' (solo citas)
-        $estado = $request->query('estado');
-        if ($estado !== null && trim($estado) !== '') {
-            $estado = trim($estado);
+        // 3. Validación de filtro 'estado'
+        $estado = null;
+        if ($request->has('estado')) {
+            $rawEstado = $request->query('estado');
+
             if ($entidad === 'insumos') {
                 return response()->json([
                     'success' => false,
@@ -105,16 +116,27 @@ class ReporteController extends Controller
                 ], 422);
             }
 
-            if (! in_array($estado, Cita::ESTADOS_VALIDOS, true)) {
+            if (! is_string($rawEstado)) {
                 return response()->json([
                     'success' => false,
                     'code' => 'INVALID_ESTADO',
-                    'error' => "Estado de cita inválido: {$estado}. Permitidos: ".implode(', ', Cita::ESTADOS_VALIDOS),
+                    'error' => "El parámetro 'estado' debe ser una cadena de texto.",
                     'timestamp' => now()->toIso8601String(),
                 ], 422);
             }
-        } else {
-            $estado = null;
+
+            $trimmedEstado = trim($rawEstado);
+            if ($trimmedEstado !== '') {
+                if (! in_array($trimmedEstado, Cita::ESTADOS_VALIDOS, true)) {
+                    return response()->json([
+                        'success' => false,
+                        'code' => 'INVALID_ESTADO',
+                        'error' => "Estado de cita inválido: {$trimmedEstado}. Permitidos: ".implode(', ', Cita::ESTADOS_VALIDOS),
+                        'timestamp' => now()->toIso8601String(),
+                    ], 422);
+                }
+                $estado = $trimmedEstado;
+            }
         }
 
         try {
@@ -134,7 +156,7 @@ class ReporteController extends Controller
             return response()->json([
                 'success' => false,
                 'code' => 'REPORT_GENERATION_ERROR',
-                'error' => 'Error al generar reporte de entidad: '.$e->getMessage(),
+                'error' => 'Error al generar reporte de entidad.',
                 'timestamp' => now()->toIso8601String(),
             ], 500);
         }

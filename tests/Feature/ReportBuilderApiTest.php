@@ -387,4 +387,54 @@ class ReportBuilderApiTest extends TestCase
             ->getJson('/api/agendamiento/reportes/insumos');
         $response2->assertStatus(200);
     }
+
+    public function test_reportes_returns_422_when_desde_or_hasta_are_arrays(): void
+    {
+        $token = $this->createTokenWithRoles(['ADMIN']);
+
+        // 1. ?desde[]=x&hasta[]=y
+        $res1 = $this->withHeader('Authorization', 'Bearer '.$token)
+            ->getJson('/api/agendamiento/reportes/citas?desde[]=x&hasta[]=y');
+        $res1->assertStatus(422)
+            ->assertJsonPath('success', false);
+
+        // 2. ?desde=2026-11-01&hasta[]=y
+        $res2 = $this->withHeader('Authorization', 'Bearer '.$token)
+            ->getJson('/api/agendamiento/reportes/citas?desde=2026-11-01&hasta[]=y');
+        $res2->assertStatus(422)
+            ->assertJsonPath('success', false);
+    }
+
+    public function test_reportes_returns_422_when_estado_is_array(): void
+    {
+        $token = $this->createTokenWithRoles(['ADMIN']);
+
+        // 3. ?estado[]=x
+        $response = $this->withHeader('Authorization', 'Bearer '.$token)
+            ->getJson('/api/agendamiento/reportes/citas?estado[]=x');
+        $response->assertStatus(422)
+            ->assertJsonPath('success', false);
+    }
+
+    public function test_reportes_sanitizes_500_failure_and_redacts_internal_canary_exception(): void
+    {
+        $token = $this->createTokenWithRoles(['ADMIN']);
+
+        $citasRepo = Mockery::mock(CitaRepositoryInterface::class);
+        $citasRepo->shouldReceive('findAll')
+            ->andThrow(new \RuntimeException('CANARY_INTERNAL endpoint=http://db.internal.test table=clinic-private'));
+        $this->app->instance(CitaRepositoryInterface::class, $citasRepo);
+
+        $response = $this->withHeader('Authorization', 'Bearer '.$token)
+            ->getJson('/api/agendamiento/reportes/citas');
+
+        $response->assertStatus(500)
+            ->assertJsonPath('success', false)
+            ->assertJsonPath('code', 'REPORT_GENERATION_ERROR');
+
+        $body = $response->getContent();
+        $this->assertStringNotContainsString('CANARY_INTERNAL', $body);
+        $this->assertStringNotContainsString('db.internal.test', $body);
+        $this->assertStringNotContainsString('clinic-private', $body);
+    }
 }
