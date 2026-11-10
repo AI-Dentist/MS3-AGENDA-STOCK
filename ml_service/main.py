@@ -211,6 +211,8 @@ class BatchPatientItem(BaseModel):
     tasa_asistencia: float = Field(..., ge=0.0, le=1.0)
     dias_promedio_entre_citas: float = Field(..., ge=0.0)
     gasto_total_estimado: float = Field(..., ge=0.0)
+    featuresImputadas: List[str] = Field(default_factory=list)
+    featuresEstimadas: List[str] = Field(default_factory=lambda: ["gasto_total_estimado"])
 
 
 class BatchStockItem(BaseModel):
@@ -218,6 +220,8 @@ class BatchStockItem(BaseModel):
     consumo_mensual: float = Field(..., ge=0.0)
     costo_unitario: float = Field(..., ge=0.0)
     dias_reabastecimiento: int = Field(..., ge=0)
+    featuresImputadas: List[str] = Field(default_factory=list)
+    featuresEstimadas: List[str] = Field(default_factory=list)
 
 
 class ClusterCentroid(BaseModel):
@@ -235,12 +239,16 @@ class PatientAssignment(BaseModel):
     paciente_id: str
     cluster: str
     cluster_id: int
+    featuresImputadas: List[str] = Field(default_factory=list)
+    featuresEstimadas: List[str] = Field(default_factory=lambda: ["gasto_total_estimado"])
 
 
 class StockAssignment(BaseModel):
     insumo_id: str
     cluster: str
     cluster_id: int
+    featuresImputadas: List[str] = Field(default_factory=list)
+    featuresEstimadas: List[str] = Field(default_factory=list)
 
 
 class PatientClustersResult(BaseModel):
@@ -260,6 +268,7 @@ class BatchClusterResponse(BaseModel):
     insumos: StockClustersResult
     modeloVersion: str = CLUSTER_VERSION
     datosSinteticos: bool = True
+    datosEntrenamientoSinteticos: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -327,7 +336,13 @@ def _cluster_patient_single(item: BatchPatientItem) -> PatientAssignment:
     }])
     cluster_id = int(models["patient_clustering"].predict(df)[0])
     name = PATIENT_CLUSTER_NAMES[cluster_id % len(PATIENT_CLUSTER_NAMES)]
-    return PatientAssignment(paciente_id=item.paciente_id, cluster=name, cluster_id=cluster_id)
+    return PatientAssignment(
+        paciente_id=item.paciente_id,
+        cluster=name,
+        cluster_id=cluster_id,
+        featuresImputadas=item.featuresImputadas,
+        featuresEstimadas=item.featuresEstimadas,
+    )
 
 
 def _cluster_stock_single(item: BatchStockItem) -> StockAssignment:
@@ -338,7 +353,13 @@ def _cluster_stock_single(item: BatchStockItem) -> StockAssignment:
     }])
     cluster_id = int(models["stock_clustering"].predict(df)[0])
     name = STOCK_CLUSTER_NAMES[cluster_id % len(STOCK_CLUSTER_NAMES)]
-    return StockAssignment(insumo_id=item.insumo_id, cluster=name, cluster_id=cluster_id)
+    return StockAssignment(
+        insumo_id=item.insumo_id,
+        cluster=name,
+        cluster_id=cluster_id,
+        featuresImputadas=item.featuresImputadas,
+        featuresEstimadas=item.featuresEstimadas,
+    )
 
 
 def _get_patient_centroids() -> List[Dict[str, Any]]:

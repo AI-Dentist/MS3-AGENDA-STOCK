@@ -327,6 +327,14 @@ def test_batch_cluster_endpoint(client):
     spec_ins = {"Alta Rotación Crítica", "Consumo Estándar", "Baja Rotación"}
     assert ins_names == spec_ins, f"Stock centroid names wrong: {ins_names}"
 
+    # S8 metadata assertions
+    assert "featuresImputadas" in pac["asignaciones"][0]
+    assert "featuresEstimadas" in pac["asignaciones"][0]
+    assert "gasto_total_estimado" in pac["asignaciones"][0]["featuresEstimadas"]
+
+    assert "featuresImputadas" in ins["asignaciones"][0]
+    assert "featuresEstimadas" in ins["asignaciones"][0]
+
 
 def test_batch_cluster_metadata(client):
     payload = {
@@ -338,3 +346,4 @@ def test_batch_cluster_metadata(client):
     data = res.json()
     assert "modeloVersion" in data
     assert data["datosSinteticos"] is True
+    assert data["datosEntrenamientoSinteticos"] is True

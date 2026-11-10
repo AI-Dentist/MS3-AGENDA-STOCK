@@ -5,8 +5,11 @@ namespace App\Infrastructure\Services;
 use App\Domain\Entities\Cita;
 use App\Domain\Repositories\CitaRepositoryInterface;
 use App\Domain\Repositories\InsumoRepositoryInterface;
+use App\Domain\Repositories\MovimientoStockRepositoryInterface;
 use App\Domain\Services\MlInferenceServiceInterface;
 use Illuminate\Support\Facades\Http;
+use DateInterval;
+use DateTimeImmutable;
 use Throwable;
 
 class FastApiMlService implements MlInferenceServiceInterface
@@ -15,7 +18,8 @@ class FastApiMlService implements MlInferenceServiceInterface
 
     public function __construct(
         private ?CitaRepositoryInterface $citaRepository = null,
-        private ?InsumoRepositoryInterface $insumoRepository = null
+        private ?InsumoRepositoryInterface $insumoRepository = null,
+        private ?MovimientoStockRepositoryInterface $movimientoStockRepository = null
     ) {
         $this->baseUrl = rtrim(env('ML_SERVICE_URL', 'http://127.0.0.1:8005'), '/');
     }
@@ -113,44 +117,137 @@ class FastApiMlService implements MlInferenceServiceInterface
     public function getClusters(): array
     {
         try {
-            // Recolectar métricas de pacientes desde el repositorio de citas
+            // 1. Recolectar métricas de pacientes desde el repositorio de citas (S8)
             $pacientesData = [];
             if ($this->citaRepository !== null) {
                 $citas = $this->citaRepository->findAll();
-                $stats = [];
+                $citasByPaciente = [];
                 foreach ($citas as $c) {
-                    $pid = $c->pacienteId;
-                    if (! isset($stats[$pid])) {
-                        $stats[$pid] = ['total' => 0, 'asistidas' => 0];
-                    }
-                    $stats[$pid]['total']++;
-                    if ($c->estado === Cita::ESTADO_COMPLETADA) {
-                        $stats[$pid]['asistidas']++;
-                    }
+                    $citasByPaciente[$c->pacienteId][] = $c;
                 }
-                foreach ($stats as $pid => $s) {
-                    $total = $s['total'];
-                    $tasa = $total > 0 ? round($s['asistidas'] / $total, 2) : 1.0;
+
+                foreach ($citasByPaciente as $pid => $pCitas) {
+                    $total = count($pCitas);
+                    $asistidas = 0;
+                    $fechas = [];
+                    foreach ($pCitas as $c) {
+                        if ($c->estado === Cita::ESTADO_COMPLETADA) {
+                            $asistidas++;
+                        }
+                        if (! empty($c->fechaHora)) {
+                            try {
+                                $fechas[] = new DateTimeImmutable($c->fechaHora);
+                            } catch (Throwable $e) {}
+                        }
+                    }
+
+                    $tasa = $total > 0 ? round($asistidas / $total, 2) : 1.0;
+                    $imputadas = [];
+                    $estimadas = ['gasto_total_estimado']; // S8: gasto siempre como estimado
+
+                    if (count($fechas) >= 2) {
+                        usort($fechas, fn ($a, $b) => $a->getTimestamp() <=> $b->getTimestamp());
+                        $totalDiffDays = 0;
+                        for ($i = 1; $i < count($fechas); $i++) {
+                            $totalDiffDays += (int) $fechas[$i - 1]->diff($fechas[$i])->days;
+                        }
+                        $diasPromedio = round($totalDiffDays / (count($fechas) - 1), 1);
+                    } else {
+                        $diasPromedio = 90.0;
+                        $imputadas[] = 'dias_promedio_entre_citas';
+                    }
+
                     $pacientesData[] = [
                         'paciente_id' => (string) $pid,
                         'total_citas' => (int) $total,
                         'tasa_asistencia' => (float) $tasa,
-                        'dias_promedio_entre_citas' => 90.0,
+                        'dias_promedio_entre_citas' => (float) $diasPromedio,
                         'gasto_total_estimado' => (float) ($total * 60.0),
+                        'featuresImputadas' => $imputadas,
+                        'featuresEstimadas' => $estimadas,
                     ];
                 }
             }
 
-            // Recolectar datos de insumos desde el repositorio de inventario
+            // 2. Recolectar datos de insumos desde inventario y movimientos_stock (S8)
             $insumosData = [];
             if ($this->insumoRepository !== null) {
                 $insumos = $this->insumoRepository->findAll();
+                $allMovimientos = $this->movimientoStockRepository !== null
+                    ? $this->movimientoStockRepository->findAll()
+                    : [];
+
+                $movimientosByInsumo = [];
+                foreach ($allMovimientos as $m) {
+                    $movimientosByInsumo[$m->insumoId][] = $m;
+                }
+
+                $now = new DateTimeImmutable();
+                $hace30Dias = $now->sub(new DateInterval('P30D'));
+
                 foreach ($insumos as $ins) {
+                    $insImputadas = [];
+                    $insEstimadas = [];
+
+                    $movs = $movimientosByInsumo[$ins->id] ?? [];
+
+                    // a. consumo_mensual = suma de SALIDA_PROCEDIMIENTO en ultimos 30 dias
+                    $salidas30d = 0;
+                    $tieneSalidas30d = false;
+                    foreach ($movs as $m) {
+                        $tipo = $m->tipoMovimiento ?? null;
+                        if ($tipo === 'SALIDA_PROCEDIMIENTO' || $tipo === 'SALIDA') {
+                            try {
+                                $dtM = new DateTimeImmutable($m->fechaHora);
+                                if ($dtM >= $hace30Dias) {
+                                    $salidas30d += abs($m->cantidad);
+                                    $tieneSalidas30d = true;
+                                }
+                            } catch (Throwable $e) {}
+                        }
+                    }
+
+                    if ($tieneSalidas30d && $salidas30d > 0) {
+                        $consumoMensual = (float) $salidas30d;
+                    } else {
+                        $consumoMensual = (float) max(1.0, $ins->stockMinimo * 2);
+                        $insImputadas[] = 'consumo_mensual';
+                    }
+
+                    // b. costo_unitario: siempre imputado (Insumo no tiene precio unitario)
+                    $costoUnitario = (float) max(1.0, $ins->precioUnitario ?? 15.0);
+                    $insImputadas[] = 'costo_unitario';
+
+                    // c. dias_reabastecimiento = media de dias entre ENTRADA_COMPRA cuando >= 2
+                    $entradasFechas = [];
+                    foreach ($movs as $m) {
+                        $tipo = $m->tipoMovimiento ?? null;
+                        if ($tipo === 'ENTRADA_COMPRA' || $tipo === 'ENTRADA') {
+                            try {
+                                $entradasFechas[] = new DateTimeImmutable($m->fechaHora);
+                            } catch (Throwable $e) {}
+                        }
+                    }
+
+                    if (count($entradasFechas) >= 2) {
+                        usort($entradasFechas, fn ($a, $b) => $a->getTimestamp() <=> $b->getTimestamp());
+                        $diffEntradas = 0;
+                        for ($i = 1; $i < count($entradasFechas); $i++) {
+                            $diffEntradas += (int) $entradasFechas[$i - 1]->diff($entradasFechas[$i])->days;
+                        }
+                        $diasReabastecimiento = max(1, (int) round($diffEntradas / (count($entradasFechas) - 1)));
+                    } else {
+                        $diasReabastecimiento = 7;
+                        $insImputadas[] = 'dias_reabastecimiento';
+                    }
+
                     $insumosData[] = [
                         'insumo_id' => (string) $ins->id,
-                        'consumo_mensual' => (float) max(1.0, $ins->stockMinimo * 2),
-                        'costo_unitario' => (float) max(1.0, $ins->precioUnitario ?? 15.0),
-                        'dias_reabastecimiento' => 7,
+                        'consumo_mensual' => $consumoMensual,
+                        'costo_unitario' => $costoUnitario,
+                        'dias_reabastecimiento' => $diasReabastecimiento,
+                        'featuresImputadas' => $insImputadas,
+                        'featuresEstimadas' => $insEstimadas,
                     ];
                 }
             }
@@ -164,7 +261,10 @@ class FastApiMlService implements MlInferenceServiceInterface
                 throw new MlSidecarUnavailableException('Error en batch-cluster: '.$response->body());
             }
 
-            return $response->json();
+            $result = $response->json();
+            $result['datosEntrenamientoSinteticos'] = true;
+
+            return $result;
         } catch (MlSidecarUnavailableException $e) {
             throw $e;
         } catch (Throwable $e) {
