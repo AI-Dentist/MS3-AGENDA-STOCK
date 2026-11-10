@@ -4,6 +4,7 @@ use App\Http\Controllers\CitaController;
 use App\Http\Controllers\HorarioController;
 use App\Http\Controllers\KpiController;
 use App\Http\Controllers\MachineLearningController;
+use App\Http\Controllers\ReporteController;
 use App\Http\Controllers\StockController;
 use Illuminate\Support\Facades\Route;
 
@@ -57,4 +58,7 @@ Route::prefix('api/agendamiento')->middleware('auth.keycloak')->group(function (
 
     // 5. KPIs Ejecutivos (S3 & S6) - Restringido a Administradores
     Route::get('/kpis', [KpiController::class, 'index'])->middleware('auth.keycloak:ADMIN');
+
+    // 6. Constructor de Reportes (Modo Manual - S3) - Restringido a Administradores
+    Route::get('/reportes/{entidad}', [ReporteController::class, 'show'])->middleware('auth.keycloak:ADMIN');
 });

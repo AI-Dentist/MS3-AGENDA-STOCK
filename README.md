@@ -165,6 +165,17 @@ El microservicio utiliza **Amazon DynamoDB** como motor de almacenamiento NoSQL 
     4. `insumosCriticos`: Listado completo de insumos ordenado con prioridad `bajoMinimo` (`stockActual <= stockMinimo`) y luego por `salidasPeriodo` (`SALIDA_PROCEDIMIENTO`) descendente.
     5. `productividadOdontologos`: Rendimiento por odontólogo (`citasTotales`, `citasCompletadas`, `tasaCompletadas`).
 
+### Constructor de Reportes (Modo Manual)
+- `GET /api/agendamiento/reportes/{entidad}?desde=YYYY-MM-DD&hasta=YYYY-MM-DD&estado=...`: Consultar catálogo tabular y metadatos de columnas para el constructor de reportes manual (S3).
+  - Entidades permitidas (`entidad`): `citas` o `insumos` (cualquier otra entidad responde **404 Not Found**).
+  - Autenticación: Exclusivo para rol `ADMIN` (`auth.keycloak:ADMIN`). Llamadas sin token devuelven **401 `UNAUTHORIZED`**; otros roles devuelven **403 `FORBIDDEN_ROLE`**.
+  - Filtro de período opcional (`desde` y `hasta`): deben enviarse ambos o ninguno. Rango de calendario válido en `America/La_Paz`, máximo 366 días (infracciones devuelven **422 `INVALID_PERIOD`** o **`PERIOD_TOO_LONG`**).
+  - Filtro de estado opcional (`estado`): aplica exclusivamente a `citas` con estados válidos del dominio (`RESERVADA`, `EN_ATENCION`, `COMPLETADA`, `CANCELADA`, `REPROGRAMADA`, `NO_ASISTIO`). Enviar `estado` para `insumos` devuelve **422 `INVALID_FILTER`**.
+  - Enriquecimiento ML: para `citas`, incluye `probabilidadNoShow` y `nivelRiesgo` (`BAJO`, `MEDIO`, `ALTO`); ante indisponibilidad del sidecar se preservan en `null` con código 200 sin inventar valores.
+  - Para `insumos`: incluye `stockActual`, `stockMinimo`, `bajoMinimo` y `salidasPeriodo` (`SALIDA_PROCEDIMIENTO` en el período, o total histórico si no se define período), ordenados con prioridad `bajoMinimo` y luego por salidas descendente.
+  - Contrato JSON: `{"success": true, "data": {"entidad": "...", "columnas": [{"clave": "...", "etiqueta": "...", "tipo": "..."}], "filas": [...], "total": N}, "timestamp": "..."}`.
+  - Garantía de solo lectura (S0): Estricta operación de lectura sin escrituras ni mutaciones en el almacén de datos.
+
 ---
 
 ## 🛠️ Ejecución Local
