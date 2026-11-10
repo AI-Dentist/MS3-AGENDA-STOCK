@@ -153,6 +153,18 @@ El microservicio utiliza **Amazon DynamoDB** como motor de almacenamiento NoSQL 
 - `POST /api/agendamiento/ml/cluster-paciente`: Segmentación de comportamiento de paciente.
 - `POST /api/agendamiento/ml/cluster-stock`: Clasificación ABC de criticidad de insumos.
 
+### KPIs Ejecutivos
+- `GET /api/agendamiento/kpis?desde=YYYY-MM-DD&hasta=YYYY-MM-DD`: Consultar los 5 KPIs ejecutivos de agenda y stock calculados a partir de citas y movimientos de inventario en tiempo real (S6).
+  - Autenticación: Exclusivo para rol `ADMIN` (`auth.keycloak:ADMIN`). Llamadas sin token devuelven **401 `UNAUTHORIZED`**; otros roles devuelven **403 `FORBIDDEN_ROLE`**.
+  - Parámetros requeridos: `desde` y `hasta` en formato `YYYY-MM-DD` bajo zona horaria `America/La_Paz`. Parámetros faltantes, formatos inválidos, fechas invertidas (`desde > hasta`) o períodos mayores a 366 días devuelven **422 `INVALID_PERIOD`** o **`PERIOD_TOO_LONG`**.
+  - Garantía de solo lectura (S0): La consulta no ejecuta escrituras ni mutaciones en el almacén de datos.
+  - Métricas calculadas:
+    1. `pacientesFrecuentes`: Ranking top 10 de pacientes por volumen de citas (`pacienteId`, `totalCitas`, `completadas`).
+    2. `inasistencia`: Tasa de inasistencia observada sobre citas evaluadas (`COMPLETADA` + `NO_ASISTIO`) con detalle de citas no asistidas.
+    3. `horariosPico`: Citas por día de la semana (ISO 1-7) y hora (0-23) excluyendo buckets en cero, junto al top 5 con mayor concurrencia.
+    4. `insumosCriticos`: Listado completo de insumos ordenado con prioridad `bajoMinimo` (`stockActual <= stockMinimo`) y luego por `salidasPeriodo` (`SALIDA_PROCEDIMIENTO`) descendente.
+    5. `productividadOdontologos`: Rendimiento por odontólogo (`citasTotales`, `citasCompletadas`, `tasaCompletadas`).
+
 ---
 
 ## 🛠️ Ejecución Local
